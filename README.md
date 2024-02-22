@@ -15,8 +15,8 @@ This project aims to optimize data transfer and processing operations, making it
 ### Prerequisites
 - C++ Compiler
 - CMake (>=3.12)
-- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) (>=12.1)
-- [DOCA](https://developer.nvidia.com/networking/doca) (>=2.2.0)
+- [CUDA Toolkit](https://developer.nvidia.com/cuda-toolkit) (>=12.3)
+- [DOCA](https://developer.nvidia.com/networking/doca) (==2.6.0)
 
 ### Build
 Clone the repository:

@@ -184,11 +184,7 @@ __global__ void cuda_kernel_receive_tcp(
                 ack_hdr->l4_hdr.cksum = 0;
                 ack_hdr->l4_hdr.tcp_flags = TCP_FLAG_ACK;
 
-#ifdef DOCA22
-                ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, ack_buf, base_pkt_len + nbytes);
-#else
                 ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, ack_buf, base_pkt_len + nbytes, 0);
-#endif
                 if (ret != DOCA_SUCCESS) {
                     printf("Error %d doca_gpu_dev_eth_txq_send_enqueue_strong block %d thread %d\n", ret, warp_id, laneId);
                     // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
@@ -542,11 +538,7 @@ __global__ void cuda_kernel_wait_3wayhandshake(
             ack_hdr->l4_hdr.cksum = 0;
             ack_hdr->l4_hdr.tcp_flags = TCP_FLAG_SYN | TCP_FLAG_ACK; //| TCP_FLAG_FIN;
 
-#ifdef DOCA22
-            ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, ack_buf, base_pkt_len + nbytes);
-#else
             ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, ack_buf, base_pkt_len + nbytes, 0);
-#endif
             if (ret != DOCA_SUCCESS) {
                 printf("Error %d doca_gpu_dev_eth_txq_send_enqueue_strong block %d thread %d\n", ret, warp_id, laneId);
                 // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
