@@ -17,13 +17,13 @@ int main()
         uint16_t dpdk_dev_port_id;
         result = init_doca_device("a1:00.0", &ddev, &dpdk_dev_port_id);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function init_doca_device returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function init_doca_device returned " + std::string(doca_error_get_descr(result)));
         }
 
         struct doca_gpu* gpu_dev = nullptr;
         result = doca_gpu_create("81:00.0", &gpu_dev);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function doca_gpu_create returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function doca_gpu_create returned " + std::string(doca_error_get_descr(result)));
         }
 
         constexpr int queue_num = 1;
@@ -36,7 +36,7 @@ int main()
         struct rxq_tcp_queues tcp_queues;
         result = create_tcp_queues(&tcp_queues, df_port, gpu_dev, ddev, queue_num, SEMAPHORES_PER_QUEUE);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function create_tp_queues returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function create_tp_queues returned " + std::string(doca_error_get_descr(result)));
         }
 
         struct sem_pair sem_frame;
@@ -44,13 +44,13 @@ int main()
         result = create_sem(gpu_dev, &sem_frame, FRAME_NUM);
         // TODO: Handle semaphore
         // if (result != DOCA_SUCCESS) {
-        //     throw std::runtime_error("Function create_sem returned " + doca_error_get_descr(result));
+        //     throw std::runtime_error("Function create_sem returned " + std::string(doca_error_get_descr(result)));
         // }
 
         /* Create root control pipe to route tcp/udp/OS packets */
         result = create_root_pipe(&tcp_queues, df_port);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function create_root_pipe returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
         }
 
 #define RECV_BYTES MINIMUM_TARBUF_SIZE
@@ -60,12 +60,12 @@ int main()
 
         result = destroy_flow_queue(dpdk_dev_port_id, df_port, &tcp_queues);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function finalize_doca_flow returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function finalize_doca_flow returned " + std::string(doca_error_get_descr(result)));
         }
 
         result = doca_gpu_destroy(gpu_dev);
         if (result != DOCA_SUCCESS) {
-            throw std::runtime_error("Function doca_gpu_destroy returned " + doca_error_get_descr(result));
+            throw std::runtime_error("Function doca_gpu_destroy returned " + std::string(doca_error_get_descr(result)));
         }
 
         std::cout << "Passed" << std::endl;

@@ -142,9 +142,9 @@ init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dp
     int ret;
 
     std::vector<std::string> eal_param = { "", "-a", "00:00.0" };
-    std::vector<char *> eal_param_;
+    std::vector<char*> eal_param_;
     for (auto& p : eal_param) {
-	    eal_param_.push_back(&p[0]);
+        eal_param_.push_back(&p[0]);
     }
     eal_param_.push_back(nullptr);
 
@@ -160,7 +160,7 @@ init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dp
         return result;
     }
 
-    ret = rte_eal_init(eal_param_.size()-1, eal_param_.data());
+    ret = rte_eal_init(eal_param_.size() - 1, eal_param_.data());
     if (ret < 0) {
         DOCA_LOG_ERR("DPDK init failed: %d", ret);
         return DOCA_ERROR_DRIVER;
@@ -276,7 +276,11 @@ init_doca_flow(uint16_t port_id, uint8_t rxq_num)
     }
 
     /* Initialize doca flow framework */
+#if defined DOCA22 || defined DOCA25
     rxq_flow_cfg.queues = rxq_num;
+#else
+    rxq_flow_cfg.pipe_queues = rxq_num;
+#endif
     /*
      * HWS: Hardware steering
      * Isolated: don't create RSS rule for DPDK created RX queues
@@ -779,7 +783,11 @@ create_tcp_queues(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* df_p
         }
 #endif
 
+#if defined DOCA22 || defined DOCA25
         result = doca_eth_rxq_get_pkt_buffer_size(tcp_queues->eth_rxq_cpu[idx], &cyclic_buffer_size);
+#else
+        result = doca_eth_rxq_estimate_packet_buf_size(DOCA_ETH_RXQ_TYPE_CYCLIC, 0, 0, MAX_PKT_SIZE, MAX_PKT_NUM, 0, &cyclic_buffer_size);
+#endif
         if (result != DOCA_SUCCESS) {
 #ifdef DOCA22
             DOCA_LOG_ERR("Failed to get eth_rxq cyclic buffer size: %s", doca_get_error_string(result));
@@ -896,7 +904,11 @@ create_tcp_queues(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* df_p
             return DOCA_ERROR_BAD_STATE;
         }
 
+#if defined DOCA22 || defined DOCA25
         result = doca_eth_rxq_set_pkt_buffer(tcp_queues->eth_rxq_cpu[idx], tcp_queues->pkt_buff_mmap[idx], 0, cyclic_buffer_size);
+#else
+        result = doca_eth_rxq_set_pkt_buf(tcp_queues->eth_rxq_cpu[idx], tcp_queues->pkt_buff_mmap[idx], 0, cyclic_buffer_size);
+#endif
         if (result != DOCA_SUCCESS) {
 #ifdef DOCA22
             DOCA_LOG_ERR("Failed to set cyclic buffer  %s", doca_get_error_string(result));
@@ -1335,8 +1347,13 @@ create_root_pipe(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* port)
         .next_pipe = tcp_queues->rxq_pipe_gpu,
     };
 
+#if defined DOCA22 || defined DOCA25
     result = doca_flow_pipe_control_add_entry(0, 0, tcp_queues->root_pipe, &tcp_match_gpu, NULL, NULL, NULL, NULL, NULL,
         &tcp_fwd_gpu, NULL, &tcp_queues->root_tcp_entry_gpu);
+#else
+    result = doca_flow_pipe_control_add_entry(0, 0, tcp_queues->root_pipe, &tcp_match_gpu, NULL, NULL, NULL, NULL, NULL, NULL,
+        &tcp_fwd_gpu, NULL, &tcp_queues->root_tcp_entry_gpu);
+#endif
     if (result != DOCA_SUCCESS) {
 #ifdef DOCA22
         DOCA_LOG_ERR("Root pipe UDP entry creation failed with: %s", doca_get_error_string(result));
@@ -1361,13 +1378,13 @@ create_root_pipe(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* port)
     return DOCA_SUCCESS;
 }
 
-std::string doca_error_get_descr(doca_error_t err)
-{
-#ifdef DOCA22
-    return doca_get_error_string(err);
-#else
-    return doca_error_get_descr(err);
-#endif
-}
+// std::string doca_error_get_descr(doca_error_t err)
+// {
+// #ifdef DOCA22
+//     return doca_get_error_string(err);
+// #else
+//     return doca_error_get_descr(err);
+// #endif
+// }
 
 } // lng
