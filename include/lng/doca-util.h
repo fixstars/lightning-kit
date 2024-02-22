@@ -35,8 +35,6 @@
 
 #include <rte_ethdev.h>
 
-#define DOCA22
-
 namespace lng {
 
 enum tcp_flags {
@@ -203,8 +201,6 @@ extern "C" {
 doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch, struct sem_pair* sem_frame);
 }
-
-std::string doca_error_get_descr(doca_error_t err);
 
 } // lng
 

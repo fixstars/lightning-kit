@@ -1,14 +1,11 @@
-#include "lng/doca-util.h"
 #include "lng/actor.h"
+#include "lng/doca-util.h"
 
 namespace lng {
 
-Actor::Actor() {
-#ifdef DOCA22
-    doca_log_create_standard_backend();
-#else
+Actor::Actor()
+{
     doca_log_backend_create_standard();
-#endif
 }
 
 }
