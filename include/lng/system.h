@@ -1,6 +1,7 @@
 #ifndef LNG_SYSTEM_H
 #define LNG_SYSTEM_H
 
+#include <string>
 #include <unordered_map>
 
 #include "lng/actor.h"
@@ -13,13 +14,14 @@ class System {
 
      template<typename T>
      Actor create_actor(const std::string id) {
+         return Actor();
      }
 
      void run() {
      }
 
  private:
-     std::unordered_map<const std::string&, Actor> actors_;
+     std::unordered_map<std::string, Actor> actors_;
 };
 
 }

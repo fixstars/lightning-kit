@@ -5,5 +5,6 @@
 #include "doca-util.h"
 #include "event.h"
 #include "signal.h"
+#include "system.h"
 
 #endif

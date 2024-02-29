@@ -1,6 +1,5 @@
 cmake_minimum_required(VERSION 3.17)
-set(CMAKE_CUDA_ARCHITECTURES 80)
-project (lightning-kit LANGUAGES CXX CUDA)
+project(lightning-kit)
 
 #
 # CMake common settings
@@ -11,8 +10,17 @@ set(CMAKE_CXX_STANDARD 20)
 # Dependent libraries
 #
 find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBDOCAGPU REQUIRED doca-gpu)
-find_package(CUDAToolkit REQUIRED)
+pkg_check_modules(LIBDOCAGPU doca-gpu)
+find_package(CUDAToolkit)
+if (CUDAToolkit_FOUND)
+    set(CMAKE_CUDA_ARCHITECTURES 80)
+    enable_language(CUDA)
+endif()
+
+#
+# Flags
+#
+set(LNG_WITH_NV ${CUDAToolkit_FOUND} AND ${LIBDOCAGPU_FOUND})
 
 #
 # Version
@@ -29,27 +37,43 @@ file(GENERATE OUTPUT ${PROJECT_BINARY_DIR}/VERSION CONTENT "${LNG_KIT_VERSION_S}
 #
 # Build main library
 #
-file(GLOB LNG_CORE_SRC LIST_DIRECTORIES false ${PROJECT_SOURCE_DIR}/src/*)
+set(LNG_CORE_SRC
+    src/actor.cc
+    src/event.cc
+    src/log.cc
+    src/signal.cc
+    src/system.cc
+    )
+if(${LNG_WITH_NV})
+    list(APPEND LNG_CORE_SRC src/protocol.cu src/doca-util.cc)
+endif()
+
 add_library(lng-core ${LNG_CORE_SRC})
-set_target_properties(lng-core
-   PROPERTIES
-       CUDA_SEPARABLE_COMPILATION ON
-       CUDA_RESOLVE_DEVICE_SYMBOLS ON
-)
 target_include_directories(lng-core
     PRIVATE ${PROJECT_SOURCE_DIR}/src
     PUBLIC ${PROJECT_SOURCE_DIR}/include)
-target_compile_options(lng-core
-    PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo --default-stream per-thread --diag-suppress 177,550,1217,3010>
-    PUBLIC ${LIBDOCAGPU_STATIC_CFLAGS} "-Wno-volatile" "-Wno-deprecated-declarations")
-target_link_libraries(lng-core
-    PRIVATE CUDA::cudart ${LIBDOCAGPU_LIBDIR}/libdoca_gpunetio_device.a
-    PUBLIC ${LIBDOCAGPU_STATIC_LDFLAGS})
+
+if(${LNG_WITH_NV})
+    set_target_properties(lng-core
+        PROPERTIES
+        CUDA_SEPARABLE_COMPILATION ON
+        CUDA_RESOLVE_DEVICE_SYMBOLS ON
+        )
+    target_compile_options(lng-core
+        PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo --default-stream per-thread --diag-suppress 177,550,1217,3010>
+        PUBLIC ${LIBDOCAGPU_STATIC_CFLAGS} "-Wno-volatile" "-Wno-deprecated-declarations")
+    target_link_libraries(lng-core
+        PRIVATE CUDA::cudart ${LIBDOCAGPU_LIBDIR}/libdoca_gpunetio_device.a
+        PUBLIC ${LIBDOCAGPU_STATIC_LDFLAGS})
+endif()
+
 #
 # Test
 #
-add_executable(test test/test.cc)
-target_link_libraries(test lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+if(${LNG_WITH_NV})
+    add_executable(test_gpunetio test/gpunetio.cc)
+    target_link_libraries(test_gpunetio lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+endif()
 
 #
 # Install
