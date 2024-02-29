@@ -6,13 +6,20 @@
 
 using namespace lng;
 
+class Receiver : public Actor {
+};
+
 int main()
 {
     try {
+
+        System sys;
+
+        Actor actor = sys.create_actor<Receiver>("/receiver");
+
+        sys.run();
+
         doca_error_t result;
-
-        Actor actor;
-
         struct doca_dev* ddev = nullptr;
         uint16_t dpdk_dev_port_id;
         result = init_doca_device("a1:00.0", &ddev, &dpdk_dev_port_id);
