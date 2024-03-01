@@ -2,9 +2,12 @@
 #define LNG_LNG_H
 
 #include "actor.h"
-#include "doca-util.h"
 #include "event.h"
-#include "signal.h"
+#include "stream.h"
 #include "system.h"
+
+#if defined(LNG_WITH_NV)
+#include "doca-util.h"
+#endif
 
 #endif

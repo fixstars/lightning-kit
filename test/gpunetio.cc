@@ -15,10 +15,6 @@ int main()
 
         System sys;
 
-        Actor actor = sys.create_actor<Receiver>("/receiver");
-
-        sys.run();
-
         doca_error_t result;
         struct doca_dev* ddev = nullptr;
         uint16_t dpdk_dev_port_id;

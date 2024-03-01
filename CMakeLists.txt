@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD 20)
 #
 # Dependent libraries
 #
+find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBDOCAGPU doca-gpu)
 find_package(CUDAToolkit)
@@ -20,7 +21,10 @@ endif()
 #
 # Flags
 #
-set(LNG_WITH_NV ${CUDAToolkit_FOUND} AND ${LIBDOCAGPU_FOUND})
+if (CUDAToolkit_FOUND AND LIBDOCAGPU_FOUND)
+    set(LNG_WITH_NV)
+    add_compile_definitions(LNG_WITH_NV=1)
+endif()
 
 #
 # Version
@@ -41,10 +45,9 @@ set(LNG_CORE_SRC
     src/actor.cc
     src/event.cc
     src/log.cc
-    src/signal.cc
     src/system.cc
     )
-if(${LNG_WITH_NV})
+if(LNG_WITH_NV)
     list(APPEND LNG_CORE_SRC src/protocol.cu src/doca-util.cc)
 endif()
 
@@ -53,7 +56,7 @@ target_include_directories(lng-core
     PRIVATE ${PROJECT_SOURCE_DIR}/src
     PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-if(${LNG_WITH_NV})
+if(LNG_WITH_NV)
     set_target_properties(lng-core
         PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
@@ -64,13 +67,18 @@ if(${LNG_WITH_NV})
         PUBLIC ${LIBDOCAGPU_STATIC_CFLAGS} "-Wno-volatile" "-Wno-deprecated-declarations")
     target_link_libraries(lng-core
         PRIVATE CUDA::cudart ${LIBDOCAGPU_LIBDIR}/libdoca_gpunetio_device.a
-        PUBLIC ${LIBDOCAGPU_STATIC_LDFLAGS})
+        PUBLIC Threads::Threads ${LIBDOCAGPU_STATIC_LDFLAGS})
+else()
+    target_link_libraries(lng-core PUBLIC Threads::Threads)
 endif()
 
 #
 # Test
 #
-if(${LNG_WITH_NV})
+add_executable(test_basic test/basic.cc)
+target_link_libraries(test_basic lng-core)
+
+if(LNG_WITH_NV)
     add_executable(test_gpunetio test/gpunetio.cc)
     target_link_libraries(test_gpunetio lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
 endif()
