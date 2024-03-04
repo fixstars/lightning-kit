@@ -144,6 +144,41 @@ struct rxq_tcp_queues {
     struct doca_gpu_semaphore_gpu* sem_http_gpu[MAX_QUEUES]; /* One semaphore per queue to report HTTP info, GPU handler*/
 };
 
+struct udp_hdr {
+    uint16_t src_port; /* UDP source port */
+    uint16_t dst_port; /* UDP destination port */
+    uint16_t dgram_len; /* UDP datagram length */
+    uint16_t dgram_cksum; /* UDP datagram checksum */
+} __attribute__((__packed__));
+
+struct eth_ip_udp_hdr {
+    struct ether_hdr l2_hdr; /* Ethernet header */
+    struct ipv4_hdr l3_hdr; /* IP header */
+    struct udp_hdr l4_hdr; /* UDP header */
+} __attribute__((__packed__));
+
+struct rxq_udp_queues {
+    struct doca_gpu* gpu_dev; /* GPUNetio handler associated to queues*/
+    struct doca_dev* ddev; /* DOCA device handler associated to queues */
+
+    uint16_t numq; /* Number of queues */
+    struct doca_ctx* eth_rxq_ctx[MAX_QUEUES]; /* DOCA Ethernet receive queue context */
+    struct doca_eth_rxq* eth_rxq_cpu[MAX_QUEUES]; /* DOCA Ethernet receive queue CPU handler */
+    struct doca_gpu_eth_rxq* eth_rxq_gpu[MAX_QUEUES]; /* DOCA Ethernet receive queue GPU handler */
+    int dmabuf_fd[MAX_QUEUES]; /* GPU memory dmabuf file descriptor */
+    struct doca_mmap* pkt_buff_mmap[MAX_QUEUES]; /* DOCA mmap to receive packet with DOCA Ethernet queue */
+    void* gpu_pkt_addr[MAX_QUEUES]; /* DOCA mmap GPU memory address */
+
+    struct doca_flow_port* port; /* DOCA Flow port */
+    struct doca_flow_pipe* rxq_pipe; /* DOCA Flow receive pipe */
+    struct doca_flow_pipe* root_pipe; /* DOCA Flow root pipe */
+    struct doca_flow_pipe_entry* root_udp_entry; /* DOCA Flow root entry */
+
+    uint16_t nums; /* Number of semaphores items */
+    struct doca_gpu_semaphore* sem_cpu[MAX_QUEUES]; /* One semaphore per queue, CPU handler*/
+    struct doca_gpu_semaphore_gpu* sem_gpu[MAX_QUEUES]; /* One semaphore per queue, GPU handler*/
+};
+
 struct sem_pair {
     uint16_t nums; /* Number of semaphores items */
     struct doca_gpu_semaphore* sem_cpu; /* One semaphore per queue to report stats, CPU handler*/
@@ -183,23 +218,39 @@ doca_error_t
 init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dpdk_port_id);
 
 struct doca_flow_port*
-init_doca_flow(uint16_t port_id, uint8_t rxq_num);
+init_doca_tcp_flow(uint16_t port_id, uint8_t rxq_num);
+
+struct doca_flow_port*
+init_doca_udp_flow(uint16_t port_id, uint8_t rxq_num);
 
 doca_error_t
 create_tcp_queues(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
 
+doca_error_t
+create_udp_queues(struct rxq_udp_queues* udp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
+
 doca_error_t create_sem(struct doca_gpu* gpu_dev, struct sem_pair* sem, uint16_t sem_num);
 
 doca_error_t
-create_root_pipe(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* port);
+create_tcp_root_pipe(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* port);
 
 doca_error_t
-destroy_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
+create_udp_root_pipe(struct rxq_udp_queues* udp_queues, struct doca_flow_port* port);
+
+doca_error_t
+destroy_tcp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     struct rxq_tcp_queues* tcp_queues);
+
+doca_error_t
+destroy_udp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
+    struct rxq_udp_queues* udp_queues);
 
 extern "C" {
 doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch, struct sem_pair* sem_frame);
+
+doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
+    uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch);
 }
 
 } // lng
