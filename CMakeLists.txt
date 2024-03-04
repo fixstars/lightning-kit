@@ -48,8 +48,10 @@ target_link_libraries(lng-core
 #
 # Test
 #
-add_executable(test test/test.cc)
-target_link_libraries(test lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+add_executable(test_tcp test/test_tcp.cc)
+target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+add_executable(test_udp test/test_udp.cc)
+target_link_libraries(test_udp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
 
 #
 # Install
