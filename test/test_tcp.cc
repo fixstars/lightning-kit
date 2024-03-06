@@ -31,7 +31,7 @@ int main()
 
         constexpr int queue_num = 1;
 
-        auto df_port = init_doca_flow(dpdk_dev_port_id, queue_num);
+        auto df_port = init_doca_tcp_flow(dpdk_dev_port_id, queue_num);
         if (df_port == nullptr) {
             throw std::runtime_error("Function init_doca_flow failed");
         }
@@ -51,7 +51,7 @@ int main()
         // }
 
         /* Create root control pipe to route tcp/udp/OS packets */
-        result = create_root_pipe(&tcp_queues, df_port);
+        result = create_tcp_root_pipe(&tcp_queues, df_port);
         if (result != DOCA_SUCCESS) {
             throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
         }
@@ -61,7 +61,7 @@ int main()
 
         kernel_receive_tcp(&tcp_queues, tar_buf.data(), RECV_BYTES, RECV_BYTES, &sem_frame);
 
-        result = destroy_flow_queue(dpdk_dev_port_id, df_port, &tcp_queues);
+        result = destroy_tcp_flow_queue(dpdk_dev_port_id, df_port, &tcp_queues);
         if (result != DOCA_SUCCESS) {
             throw std::runtime_error("Function finalize_doca_flow returned " + std::string(doca_error_get_descr(result)));
         }

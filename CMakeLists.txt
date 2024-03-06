@@ -79,8 +79,10 @@ add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
 
 if(LNG_WITH_NV)
-    add_executable(test_gpunetio test/gpunetio.cc)
-    target_link_libraries(test_gpunetio lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+    add_executable(test_tcp test/test_tcp.cc)
+    target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+    add_executable(test_udp test/test_udp.cc)
+    target_link_libraries(test_udp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
 endif()
 
 #
