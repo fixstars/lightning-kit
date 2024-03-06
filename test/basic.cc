@@ -1,9 +1,11 @@
 #include <iostream>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "lng/lng.h"
 
+using namespace std::chrono_literals;
 using namespace lng;
 
 template<typename T>
@@ -13,6 +15,7 @@ public:
         : Actor(id), stream_(s)
     {}
 
+protected:
     virtual void main() override {
         int v = 1;
         std::cout << "Producing " << v << std::endl << std::flush;
@@ -30,6 +33,7 @@ public:
         : Actor(id), stream_(s)
     {}
 
+protected:
     virtual void main() override {
         int v = stream_.get();
         std::cout << "Consuming " << v << std::endl << std::flush;
@@ -46,10 +50,13 @@ int main()
 
         Stream<int> stream;
 
-        Actor consumer(sys.create_actor<Consumer<int>>("/consumer", stream));
-        Actor producer(sys.create_actor<Producer<int>>("/producer", stream));
+        auto consumer(sys.create_actor<Consumer<int>>("/consumer", stream));
+        auto producer(sys.create_actor<Producer<int>>("/producer", stream));
 
         sys.start();
+
+        std::this_thread::sleep_for(2s);
+
         sys.stop();
 
     } catch (const std::exception& e) {

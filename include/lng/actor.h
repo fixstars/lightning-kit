@@ -21,7 +21,7 @@ class Actor {
     struct Impl {
         std::thread th;
         std::mutex mutex;
-        std::condion_variable cvar;
+        std::condition_variable cvar;
 
         std::string id;
         State state;
@@ -32,6 +32,11 @@ class Actor {
         }
 
         ~Impl() {
+            {
+                std::unique_lock lock(mutex);
+                state = State::Terminated;
+            }
+            cvar.notify_all();
             if (th.joinable()) {
                 th.join();
             }
@@ -41,21 +46,15 @@ class Actor {
 public:
     Actor(const std::string& id);
 
-    virtual void main() {}
+    void start();
+    void stop();
 
-    static void entry_point(Actor *obj);
-
-    void start() {
-        std::scoped_lock lock(impl_->mutex);
-        impl_->state = State::Running;
-    }
-
-    void stop() {
-        std::scoped_lock lock(impl_->mutex);
-        impl_->state = State::Ready;
-    }
+protected:
+    virtual void main() = 0;
 
 private:
+
+    static void entry_point(Actor *obj);
 
     std::shared_ptr<Impl> impl_;
 };
