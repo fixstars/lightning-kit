@@ -12,18 +12,17 @@ template<typename T>
 class Producer : public Actor {
 public:
     Producer(const std::string& id, Stream<T> s)
-        : Actor(id), stream_(s)
+        : Actor(id), stream_(s), v_(0)
     {}
 
 protected:
     virtual void main() override {
-        int v = 1;
-        std::cout << "Producing " << v << std::endl << std::flush;
-        stream_.put(v);
+        stream_.put(v_++);
     }
 
 private:
     Stream<T> stream_;
+    int v_;
 };
 
 template<typename T>
@@ -36,7 +35,7 @@ public:
 protected:
     virtual void main() override {
         int v = stream_.get();
-        std::cout << "Consuming " << v << std::endl << std::flush;
+        std::cout << "Consuming " << v << std::endl;
     }
 
 private:
@@ -55,9 +54,11 @@ int main()
 
         sys.start();
 
-        std::this_thread::sleep_for(2s);
+        std::this_thread::sleep_for(1ms);
 
         sys.stop();
+
+        std::this_thread::sleep_for(1s);
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
