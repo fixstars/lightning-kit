@@ -6,7 +6,7 @@
 #include "stream.h"
 #include "system.h"
 
-#if defined(LNG_WITH_NV)
+#if defined(LNG_WITH_NVIDIA)
 #include "doca-util.h"
 #endif
 
