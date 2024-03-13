@@ -53,7 +53,12 @@ set(LNG_CORE_SRC
     src/system.cc
     )
 if(LNG_WITH_NVIDIA)
-    list(APPEND LNG_CORE_SRC src/protocol.cu src/doca-util.cc)
+    list(APPEND LNG_CORE_SRC
+        src/protocol_tcp.cu
+        src/protocol_udp.cu
+        src/doca-common-util.cc
+        src/doca-tcp-util.cc
+        src/doca-udp-util.cc)
 endif()
 add_library(lng-core ${LNG_CORE_SRC})
 
