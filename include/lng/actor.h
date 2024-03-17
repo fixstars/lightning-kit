@@ -55,7 +55,7 @@ private:
 public:
     Actor(const std::string& id);
 
-    void start()
+    void start();
     void stop();
     void terminate();
     void wait_until(State to);

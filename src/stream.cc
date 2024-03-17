@@ -13,8 +13,7 @@ namespace lng {
 DPDKStream::Impl::Impl(uint16_t port_id)
     : port_id(port_id)
 {
-
-    constexpr uint32_t mtu = 8000;
+    constexpr uint32_t mtu = 9000;
 
     // Initializion the environment abstraction layer
     std::vector<std::string> arguments = {"."};
@@ -41,7 +40,7 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     // Initializing all ports
-    if (!rte_eth_dev_is_valid_port(0)) {
+    if (!rte_eth_dev_is_valid_port(port_id)) {
         throw std::runtime_error(fmt::format("Port {} is not valid", port_id));
     }
 
@@ -56,32 +55,36 @@ DPDKStream::Impl::Impl(uint16_t port_id)
 
     port_conf.link_speeds = RTE_ETH_LINK_SPEED_FIXED | RTE_ETH_LINK_SPEED_100G;
     port_conf.rxmode.mtu = mtu;
-    // if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_TCP_LRO) {
-    //     port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_TCP_LRO;
-    //     port_conf.rxmode.max_lro_pkt_size = dev_info.max_lro_pkt_size;
-    // }
-    // if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_SCATTER) {
-    //     port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_SCATTER;
-    // }
-    // if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_CHECKSUM) {
-    //     port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_CHECKSUM;
-    // }
 
-    // if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE) {
-    //     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
-    // }
-    // if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MULTI_SEGS) {
-    //     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
-    // }
-    // if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_IPV4_CKSUM) {
-    //     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
-    // }
-    // if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_TCP_CKSUM) {
-    //     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_TCP_CKSUM;
-    // }
-    // if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_TCP_TSO) {
-    //     port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_TCP_TSO;
-    // }
+    // RX offload
+    // NOTE: Disabling LRO may occur that rx_burst does not receive any packets
+    if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_TCP_LRO) {
+        port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_TCP_LRO;
+        port_conf.rxmode.max_lro_pkt_size = dev_info.max_lro_pkt_size;
+    }
+    if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_SCATTER) {
+        port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_SCATTER;
+    }
+    if (dev_info.rx_offload_capa & RTE_ETH_RX_OFFLOAD_CHECKSUM) {
+        port_conf.rxmode.offloads |= RTE_ETH_RX_OFFLOAD_CHECKSUM;
+    }
+
+    // TX offload
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE) {
+        port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_MBUF_FAST_FREE;
+    }
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_MULTI_SEGS) {
+        port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_MULTI_SEGS;
+    }
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_IPV4_CKSUM) {
+        port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_IPV4_CKSUM;
+    }
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_TCP_CKSUM) {
+        port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_TCP_CKSUM;
+    }
+    if (dev_info.tx_offload_capa & RTE_ETH_TX_OFFLOAD_TCP_TSO) {
+        port_conf.txmode.offloads |= RTE_ETH_TX_OFFLOAD_TCP_TSO;
+    }
 
     // Configure the ethernet device
     const uint16_t rx_rings = 1;
@@ -143,7 +146,6 @@ DPDKStream::Impl::Impl(uint16_t port_id)
         throw std::runtime_error(fmt::format("Failed to set promiscuous mode: {}", strerror(-ret)));
     }
 
-
     // Recreive link status
     rte_eth_link link;
     ret = rte_eth_link_get(port_id, &link);
@@ -152,8 +154,6 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
-
-
 }
 
 DPDKStream::Impl::~Impl() {
@@ -161,6 +161,21 @@ DPDKStream::Impl::~Impl() {
     if (ret < 0) {
         log::error("Failed to stop device: {}", strerror(-ret));
     }
+
+    struct rte_eth_stats stats;
+    if (!rte_eth_stats_get(port_id, &stats)) {
+        // std::chrono::duration<double> elapsed_ = m_end_tp - m_start_tp;
+        // auto elapsed = elapsed_.count();
+        // double total_gbytes = stats.ibytes * 1e-9;
+        // double total_gbits = total_gbytes * 8;
+        log::debug("Total Rx bytes   : {}", stats.ibytes);
+        log::debug("Total Rx packets : {}", stats.ipackets);
+        // std::cout << "Wrong Rx packets : " << m_wrong_packets << std::endl;
+        // std::cout << "Packet loss rate : " << static_cast<double>(m_wrong_packets) / static_cast<double>(stats.ipackets) << std::endl;
+        // std::cout << "Elapsed time     : " << elapsed << " sec" << std::endl;
+        // std::cout << "Bandwidth        : " << total_gbits/elapsed << " Gbps" << std::endl;
+    }
+
     rte_eal_cleanup();
 }
 
