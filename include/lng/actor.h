@@ -10,14 +10,28 @@
 namespace lng {
 
 class Actor {
-
+public:
+    //
+    // -> : Self transition
+    // => : Enforced transition
+    //
+    //           +-------------------------------+
+    //           |                               |
+    //           v                               |
+    // Init -> Ready => Started -> Running => Stopped
+    //           |
+    //           +=> Terminated -> Fin
     enum class State {
-        Initialized,
+        Init = 0,
         Ready,
+        Started,
         Running,
+        Stopped,
         Terminated,
+        Fin,
     };
 
+private:
     struct Impl {
         std::thread th;
         std::mutex mutex;
@@ -27,16 +41,11 @@ class Actor {
         State state;
 
         Impl(Actor *obj, const std::string& id)
-            : th(entry_point, obj), mutex(), cvar(), id(id), state(State::Initialized)
+            : th(entry_point, obj), mutex(), cvar(), id(id), state(State::Init)
         {
         }
 
         ~Impl() {
-            {
-                std::unique_lock lock(mutex);
-                state = State::Terminated;
-            }
-            cvar.notify_all();
             if (th.joinable()) {
                 th.join();
             }
@@ -46,8 +55,10 @@ class Actor {
 public:
     Actor(const std::string& id);
 
-    void start();
+    void start()
     void stop();
+    void terminate();
+    void wait_until(State to);
 
 protected:
     virtual void main() = 0;
@@ -55,6 +66,7 @@ protected:
 private:
 
     static void entry_point(Actor *obj);
+    void transit(State from, State to);
 
     std::shared_ptr<Impl> impl_;
 };

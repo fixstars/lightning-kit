@@ -26,12 +26,34 @@ class System {
          for (auto& [id, actor] : actors_) {
              actor->start();
          }
+
+         // Make sure to be running all actors
+         for (auto& [n, actor] : actors_) {
+             actor->wait_until(Actor::State::Running);
+         }
      }
 
      void stop() {
          // TODO: Considering tree dependency
          for (auto& [id, actor] : actors_) {
              actor->stop();
+         }
+
+         // Make sure to be ready all actors
+         for (auto& [n, actor] : actors_) {
+             actor->wait_until(Actor::State::Ready);
+         }
+     }
+
+     void terminate() {
+         // TODO: Considering tree dependency
+         for (auto& [n, actor] : actors_) {
+             actor->terminate();
+         }
+
+         // Make sure to finalize all actors
+         for (auto& [n, actor] : actors_) {
+             actor->wait_until(Actor::State::Fin);
          }
      }
 
