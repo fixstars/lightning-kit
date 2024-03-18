@@ -465,24 +465,160 @@ int sending_udp_data(void* arg1)
     return 0;
 }
 
+void wait_packet(uint16_t portid,
+    const std::function<bool()>& timeout_func,
+    const std::function<bool(const rte_udp_hdr* udp, const uint8_t* payload)>& packet_func)
+{
+
+    uint32_t sent_seq = 0;
+    uint32_t recv_ack = 0;
+    bool expected_packet_reached = false;
+
+    while (timeout_func() && (!expected_packet_reached)) {
+        rte_mbuf* buf;
+        if (rte_eth_rx_burst(portid, 0, &buf, 16)) {
+            rte_net_hdr_lens hdr_lens;
+            auto packet_type = rte_net_get_ptype(buf, &hdr_lens, RTE_PTYPE_ALL_MASK);
+            if (RTE_ETH_IS_IPV4_HDR(packet_type) && ((packet_type & RTE_PTYPE_L4_MASK) == RTE_PTYPE_L4_UDP)) {
+                auto udp = rte_pktmbuf_mtod_offset(buf, rte_udp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
+                auto payload = rte_pktmbuf_mtod_offset(buf, uint8_t*, hdr_lens.l2_len + hdr_lens.l3_len + hdr_lens.l4_len);
+                if (packet_func(udp, payload)) {
+                    expected_packet_reached = true;
+                }
+            }
+            rte_pktmbuf_free(buf);
+        }
+    }
+
+    return;
+}
+
+int measure_udp_rtt(void* arg1)
+{
+    struct client_args* arg = (struct client_args*)arg1;
+    struct rte_mempool* mbuf_pool = arg->mbuf_pool;
+
+    uint16_t dev_port_id = arg->dev_port_id;
+
+    uint32_t bandwidth_in_gbps = arg->bandwidth_in_gbps;
+
+    uint16_t nb_txd = arg->nb_txd;
+
+    const size_t chunk_size = arg->chunk_size; // 16MiB
+
+    // NOTE: Assume frame index is always zero to make things easy
+    std::vector<std::tuple<std::vector<struct rte_mbuf*>, size_t>> bss;
+    {
+        auto& raw_buffer = arg->send_buf;
+        for (size_t i = 0; i < raw_buffer.size(); i += chunk_size) {
+            size_t payload_size = std::min(chunk_size, raw_buffer.size() - i);
+            auto bs = arg->udp_pkt_maker->build(&raw_buffer[i], payload_size);
+            bss.push_back(std::make_tuple(bs, payload_size));
+        }
+    }
+
+    std::vector<struct rte_mbuf*> bs;
+
+    int32_t n = 0;
+
+    uint64_t sent_in_bytes = 0;
+
+    uint8_t payload[1];
+
+    double sum_rtt = 0;
+    double sum2_rtt = 0;
+    double max_rtt = -1;
+    double min_rtt = 1000000;
+
+    int64_t rtt_count = 0;
+
+    while (g_running) {
+
+        auto bs = arg->udp_pkt_maker->build(payload, 1)[0];
+
+        auto ts1 = std::chrono::high_resolution_clock::now();
+        auto nb = rte_eth_tx_burst(dev_port_id, 0, &bs, 1);
+        if (nb != 1) {
+            throw std::runtime_error("Failed to send data");
+        }
+
+        wait_packet(
+            dev_port_id,
+            [&]() {
+                return g_running;
+            },
+            [&](const rte_udp_hdr* udp, const uint8_t* recved_payload) {
+                return (udp->dst_port == rte_cpu_to_be_16(arg->client_port) && recved_payload[0] == payload[0]);
+            });
+        auto ts2 = std::chrono::high_resolution_clock::now();
+
+        if ((n++ % 100) == 0) {
+            std::cout << "." << std::flush;
+        }
+
+        double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(ts2 - ts1).count() / 1000.0;
+        if (n > 50) {
+            sum_rtt += elapsed;
+            sum2_rtt += elapsed * elapsed;
+            max_rtt = std::max(max_rtt, elapsed);
+            min_rtt = std::min(min_rtt, elapsed);
+            rtt_count++;
+        }
+
+        payload[0]++;
+
+        if (0 < arg->send_buf_num && arg->send_buf_num <= n) {
+            break;
+        }
+    }
+
+    if (rtt_count > 0) {
+        printf("*****************************\n");
+        printf("average rtt : %f usec \n", sum_rtt / rtt_count);
+        printf("std_dev rtt : %f usec \n", std::sqrt(sum2_rtt / rtt_count - (sum_rtt / rtt_count) * (sum_rtt / rtt_count)));
+        printf("minimum rtt : %f usec \n", (double)min_rtt);
+        printf("maximum rtt : %f usec \n", (double)max_rtt);
+        printf("*****************************\n");
+    }
+
+    return 0;
+}
+
 void run_udp(
-    std::vector<client_args>& client_argses)
+    std::vector<client_args>& client_argses,
+    bool is_rtt)
 {
     int lcore_id;
 
-    RTE_LCORE_FOREACH_WORKER(lcore_id)
-    {
-        int i = conv_lcore_to_idx(lcore_id, client_argses);
-        rte_eal_remote_launch(sending_udp_data, (void*)&client_argses.at(i), lcore_id);
-    }
+    if (is_rtt) {
+        RTE_LCORE_FOREACH_WORKER(lcore_id)
+        {
+            int i = conv_lcore_to_idx(lcore_id, client_argses);
+            rte_eal_remote_launch(measure_udp_rtt, (void*)&client_argses.at(i), lcore_id);
+        }
 
-    {
-        lcore_id = rte_get_main_lcore();
-        int i = conv_lcore_to_idx(lcore_id, client_argses);
-        sending_udp_data((void*)&client_argses.at(i));
-    }
+        {
+            lcore_id = rte_get_main_lcore();
+            int i = conv_lcore_to_idx(lcore_id, client_argses);
+            measure_udp_rtt((void*)&client_argses.at(i));
+        }
 
-    rte_eal_mp_wait_lcore();
+        rte_eal_mp_wait_lcore();
+    } else {
+        RTE_LCORE_FOREACH_WORKER(lcore_id)
+        {
+            int i = conv_lcore_to_idx(lcore_id, client_argses);
+            rte_eal_remote_launch(sending_udp_data, (void*)&client_argses.at(i), lcore_id);
+        }
+
+        {
+            lcore_id = rte_get_main_lcore();
+            int i = conv_lcore_to_idx(lcore_id, client_argses);
+            sending_udp_data((void*)&client_argses.at(i));
+        }
+
+        rte_eal_mp_wait_lcore();
+    }
 }
 
 static inline std::vector<std::string> split(std::string str)
@@ -659,6 +795,11 @@ int main(int argc, char** argv)
         .help("specify the chunk size for one rx")
         .scan<'u', uint32_t>();
 
+    program.add_argument("--is_rtt")
+        .default_value(false)
+        .implicit_value(true)
+        .help("measure rtt");
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -682,6 +823,7 @@ int main(int argc, char** argv)
     size_t frame_size = program.get<size_t>("--frame_size");
     uint32_t frame_num = program.get<uint32_t>("--frame_num");
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
+    bool is_rtt = program.get<bool>("--is_rtt");
 
     auto socket_mem = get_socket_mem(lcores);
 
@@ -717,7 +859,7 @@ int main(int argc, char** argv)
         init(client_argses, dev_pci_addrs, lcores,
             socket_mem, iova_mode, bandwidth_in_gbps, log_level);
 
-        run_udp(client_argses);
+        run_udp(client_argses, is_rtt);
 
     } catch (const std::exception& e) {
         std::cerr << e.what() << std::endl;
