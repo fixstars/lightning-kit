@@ -11,19 +11,29 @@ set(CMAKE_CXX_STANDARD 20)
 #
 find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
+
+# DPDK
+pkg_check_modules(LIBDPDK libdpdk)
+
+# DOCA
 pkg_check_modules(LIBDOCAGPU doca-gpu)
+
+# CUDA
 find_package(CUDAToolkit)
-if (CUDAToolkit_FOUND)
+
+if(CUDAToolkit_FOUND)
+    set(LNG_WITH_CUDA 1)
+    add_compile_definitions(LNG_WITH_CUDA=1)
     set(CMAKE_CUDA_ARCHITECTURES 80)
     enable_language(CUDA)
 endif()
 
-#
-# Flags
-#
-if (CUDAToolkit_FOUND AND LIBDOCAGPU_FOUND)
-    set(LNG_WITH_NV)
-    add_compile_definitions(LNG_WITH_NV=1)
+if(LIBDOCAGPU_FOUND)
+    set(LNG_WITH_DOCA 1)
+    add_compile_definitions(LNG_WITH_DOCA=1)
+elseif(LIBDPDK_FOUND)
+    set(LNG_WITH_DPDK 1)
+    add_compile_definitions(LNG_WITH_DPDK=1)
 endif()
 
 #
@@ -45,32 +55,55 @@ set(LNG_CORE_SRC
     src/actor.cc
     src/event.cc
     src/log.cc
+    src/stream.cc
     src/system.cc
     )
-if(LNG_WITH_NV)
-    list(APPEND LNG_CORE_SRC src/protocol.cu src/doca-util.cc)
+if(LNG_WITH_CUDA)
+    list(APPEND LNG_CORE_SRC
+        src/protocol_tcp.cu
+        src/protocol_udp.cu)
 endif()
-
+if(LNG_WITH_DOCA)
+    list(APPEND LNG_CORE_SRC
+        src/doca-common-util.cc
+        src/doca-tcp-util.cc
+        src/doca-udp-util.cc)
+endif()
 add_library(lng-core ${LNG_CORE_SRC})
-target_include_directories(lng-core
-    PRIVATE ${PROJECT_SOURCE_DIR}/src
-    PUBLIC ${PROJECT_SOURCE_DIR}/include)
 
-if(LNG_WITH_NV)
+set(LNG_CORE_INCLUDE_DIRECTORIES_PUBLIC ${PROJECT_SOURCE_DIR}/include)
+set(LNG_CORE_INCLUDE_DIRECTORIES_PRIVATE ${PROJECT_SOURCE_DIR}/src)
+set(LNG_CORE_COMPILE_OPTIONS_PUBLIC)
+set(LNG_CORE_COMPILE_OPTIONS_PRIVATE)
+set(LNG_CORE_LINK_LIBRARIES_PUBLIC Threads::Threads)
+set(LNG_CORE_LINK_LIBRARIES_PRIVATE)
+if(LNG_WITH_CUDA)
+    list(APPEND LNG_CORE_COMPILE_OPTIONS_PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo --default-stream per-thread --diag-suppress 177,550,1217,3010>)
+    list(APPEND LNG_CORE_LINK_LIBRARIES_PRIVATE CUDA::cudart)
     set_target_properties(lng-core
         PROPERTIES
         CUDA_SEPARABLE_COMPILATION ON
         CUDA_RESOLVE_DEVICE_SYMBOLS ON
         )
-    target_compile_options(lng-core
-        PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-lineinfo --default-stream per-thread --diag-suppress 177,550,1217,3010>
-        PUBLIC ${LIBDOCAGPU_STATIC_CFLAGS} "-Wno-volatile" "-Wno-deprecated-declarations")
-    target_link_libraries(lng-core
-        PRIVATE CUDA::cudart ${LIBDOCAGPU_LIBDIR}/libdoca_gpunetio_device.a
-        PUBLIC Threads::Threads ${LIBDOCAGPU_STATIC_LDFLAGS})
-else()
-    target_link_libraries(lng-core PUBLIC Threads::Threads)
 endif()
+if(LNG_WITH_DOCA)
+    list(APPEND LNG_CORE_COMPILE_OPTIONS_PUBLIC ${LIBDOCAGPU_STATIC_CFLAGS} "-Wno-volatile" "-Wno-deprecated-declarations")
+    list(APPEND LNG_CORE_LINK_LIBRARIES_PUBLIC ${LIBDOCAGPU_STATIC_LDFLAGS})
+    list(APPEND LNG_CORE_LINK_LIBRARIES_PRIVATE ${LIBDOCAGPU_LIBDIR}/libdoca_gpunetio_device.a)
+endif()
+if(LNG_WITH_DPDK)
+    list(APPEND LNG_CORE_COMPILE_OPTIONS_PUBLIC ${LIBDPDK_STATIC_CFLAGS})
+    list(APPEND LNG_CORE_LINK_LIBRARIES_PUBLIC ${LIBDPDK_STATIC_LDFLAGS})
+endif()
+target_include_directories(lng-core
+    PUBLIC ${LNG_CORE_INCLUDE_DIRECTORIES_PUBLIC}
+    PRIVATE ${LNG_CORE_INCLUDE_DIRECTORIES_PRIVATE})
+target_compile_options(lng-core
+    PUBLIC ${LNG_CORE_COMPILE_OPTIONS_PUBLIC}
+    PRIVATE ${LNG_CORE_COMPILE_OPTIONS_PRIVATE})
+target_link_libraries(lng-core
+    PUBLIC ${LNG_CORE_LINK_LIBRARIES_PUBLIC}
+    PRIVATE ${LNG_CORE_LINK_LIBRARIES_PRIVATE})
 
 #
 # Test
@@ -78,7 +111,12 @@ endif()
 add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
 
-if(LNG_WITH_NV)
+if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
+    add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
+    target_link_libraries(test_dpdk_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+endif()
+
+if(LNG_WITH_NVIDIA)
     add_executable(test_tcp test/test_tcp.cc)
     target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
     add_executable(test_udp test/test_udp.cc)
