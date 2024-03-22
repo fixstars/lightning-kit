@@ -69,17 +69,20 @@ public:
         const std::string& src_addr,
         const std::string& dst_addr,
         uint16_t src_port,
-        uint16_t dst_port)
+        std::vector<uint16_t>& dst_ports)
         : mbuf_pool_(mbuf_pool)
         , dev_info_(dev_info)
         , src_port_(rte_cpu_to_be_16(src_port))
-        , dst_port_(rte_cpu_to_be_16(dst_port))
     {
         rte_ether_unformat_addr(src_ether_addr.c_str(), &src_ether_addr_);
         rte_ether_unformat_addr(dst_ether_addr.c_str(), &dst_ether_addr_);
 
         src_addr_ = convert_ipv4_addr(parse_ipv4_addr(src_addr));
         dst_addr_ = convert_ipv4_addr(parse_ipv4_addr(dst_addr));
+
+        for (auto& dst_port : dst_ports) {
+            dst_ports_.push_back(rte_cpu_to_be_16(dst_port));
+        }
     }
 
     std::vector<struct rte_mbuf*> build(void* payload_data, size_t payload_size)
@@ -124,7 +127,7 @@ public:
             // L4
             auto* udp = reinterpret_cast<struct rte_udp_hdr*>(head + l2_len + l3_len);
             udp->src_port = src_port_;
-            udp->dst_port = dst_port_;
+            udp->dst_port = dst_ports_.at(0);
             udp->dgram_cksum = 0;
 
             size_t segmented_payload_size = std::min(std::min(static_cast<size_t>(remaining), static_cast<size_t>(rte_pktmbuf_tailroom(buf))), static_cast<size_t>(mss));
@@ -151,6 +154,8 @@ public:
         return bufs;
     }
 
+    std::vector<rte_be16_t> dst_ports_;
+
 private:
     rte_mempool* mbuf_pool_;
     rte_eth_dev_info dev_info_;
@@ -162,7 +167,6 @@ private:
     rte_be32_t dst_addr_;
 
     rte_be16_t src_port_;
-    rte_be16_t dst_port_;
 };
 
 struct client_args {
@@ -175,13 +179,14 @@ struct client_args {
     std::string client_ip_addr;
     std::string server_ip_addr;
     uint16_t client_port;
-    uint16_t server_port;
+    std::vector<uint16_t> server_ports;
     uint32_t bandwidth_in_gbps;
     uint16_t nb_txd;
     std::unique_ptr<UDPPacketMaker> udp_pkt_maker;
     std::vector<uint8_t> send_buf;
     uint32_t send_buf_num;
     uint32_t chunk_size;
+    uint32_t port_change_interval;
 };
 
 int init_rte_env(void* arg1)
@@ -317,7 +322,7 @@ int init_rte_env(void* arg1)
         arg->client_ip_addr,
         arg->server_ip_addr,
         arg->client_port,
-        arg->server_port);
+        arg->server_ports);
 
     return 0;
 }
@@ -385,10 +390,14 @@ void print_statistics(const double elapsed, const double size)
     printf("************************************\n");
 }
 
+#define NUM_DUP 2048
+
 int sending_udp_data(void* arg1)
 {
     struct client_args* arg = (struct client_args*)arg1;
     struct rte_mempool* mbuf_pool = arg->mbuf_pool;
+
+    uint32_t port_change_interval = arg->port_change_interval;
 
     uint16_t dev_port_id = arg->dev_port_id;
 
@@ -402,10 +411,12 @@ int sending_udp_data(void* arg1)
     std::vector<std::tuple<std::vector<struct rte_mbuf*>, size_t>> bss;
     {
         auto& raw_buffer = arg->send_buf;
-        for (size_t i = 0; i < raw_buffer.size(); i += chunk_size) {
-            size_t payload_size = std::min(chunk_size, raw_buffer.size() - i);
-            auto bs = arg->udp_pkt_maker->build(&raw_buffer[i], payload_size);
-            bss.push_back(std::make_tuple(bs, payload_size));
+        for (int j = 0; j < NUM_DUP; j++) {
+            for (size_t i = 0; i < raw_buffer.size(); i += chunk_size) {
+                size_t payload_size = std::min(chunk_size, raw_buffer.size() - i);
+                auto bs = arg->udp_pkt_maker->build(&raw_buffer[i], payload_size);
+                bss.push_back(std::make_tuple(bs, payload_size));
+            }
         }
     }
 
@@ -417,6 +428,13 @@ int sending_udp_data(void* arg1)
 
     auto ts1 = std::chrono::high_resolution_clock::now();
 
+    uint32_t itr = 0;
+    int ports_num = arg->udp_pkt_maker->dst_ports_.size();
+    std::vector<uint64_t> count_bytes(ports_num, 0);
+    std::vector<uint8_t> send_pkt_id(ports_num, 0);
+
+    uint32_t num_itr = (NUM_DUP - 1 + arg->send_buf_num) / NUM_DUP;
+
     while (g_running) {
 
         for (const auto& bs_info : bss) {
@@ -427,6 +445,18 @@ int sending_udp_data(void* arg1)
             bs.resize(reference_bs.size());
             for (auto i = 0; i < bs.size(); ++i) {
                 bs[i] = rte_pktmbuf_clone(reference_bs[i], mbuf_pool);
+                // bs[i] = rte_pktmbuf_copy(reference_bs[i], mbuf_pool, 0, 7972);
+
+                auto* udp = rte_pktmbuf_mtod_offset(bs[i], struct rte_udp_hdr*, bs[i]->l2_len + bs[i]->l3_len);
+                int idx = (itr / port_change_interval) % ports_num;
+                count_bytes.at(idx) += rte_cpu_to_be_16(udp->dgram_len);
+                udp->dst_port = arg->udp_pkt_maker->dst_ports_.at(idx);
+
+                auto* body = rte_pktmbuf_mtod_offset(bs[i], uint8_t*, bs[i]->l2_len + bs[i]->l3_len + bs[i]->l4_len);
+                body[0] = send_pkt_id.at(idx);
+                send_pkt_id.at(idx)++;
+                // std::cout << bs[i]->l2_len << " " << bs[i]->l3_len << " " << bs[i]->l4_len << " l2 l3 l4" << std::endl;
+                itr++;
             }
 
             while (rte_eth_tx_descriptor_status(dev_port_id, 0, nb_txd * 3 / 4) != RTE_ETH_TX_DESC_DONE && g_running) {
@@ -443,11 +473,11 @@ int sending_udp_data(void* arg1)
             }
         }
 
-        if ((n++ % 100) == 0) {
+        if ((n++ % 1000) == 0) {
             std::cout << "." << std::flush;
         }
 
-        if (0 < arg->send_buf_num && arg->send_buf_num <= n) {
+        if (0 < num_itr && num_itr <= n) {
             break;
         }
     }
@@ -457,6 +487,10 @@ int sending_udp_data(void* arg1)
     double elapsed = elapsed_.count();
 
     fmt::print("Sent all {} frames\n", n);
+
+    for (int i = 0; i < ports_num; ++i) {
+        fmt::print("port {} sent {} bytes\n", rte_cpu_to_be_16(arg->udp_pkt_maker->dst_ports_.at(i)), count_bytes.at(i));
+    }
 
     struct rte_eth_stats stats;
     if (!rte_eth_stats_get(dev_port_id, &stats)) {
@@ -552,7 +586,7 @@ int measure_udp_rtt(void* arg1)
             });
         auto ts2 = std::chrono::high_resolution_clock::now();
 
-        if ((n++ % 100) == 0) {
+        if ((n++ % 10000) == 0) {
             std::cout << "." << std::flush;
         }
 
@@ -563,6 +597,9 @@ int measure_udp_rtt(void* arg1)
             max_rtt = std::max(max_rtt, elapsed);
             min_rtt = std::min(min_rtt, elapsed);
             rtt_count++;
+            if (elapsed > 1000) {
+                printf("%d %f rtt\n", n, elapsed);
+            }
         }
 
         payload[0]++;
@@ -621,26 +658,27 @@ void run_udp(
     }
 }
 
-static inline std::vector<std::string> split(std::string str)
+static inline std::vector<std::string> split(std::string str, char delim = ',')
 {
     std::vector<std::string> ret;
     std::stringstream ss(str);
     std::string word;
     while (!ss.eof()) {
-        std::getline(ss, word, ',');
+        std::getline(ss, word, delim);
         ret.push_back(word);
     }
     return ret;
 }
 
-std::vector<int> split_int(std::string str)
+template <class T>
+std::vector<T> split_int(std::string str)
 {
-    std::vector<int> ret;
+    std::vector<T> ret;
     std::stringstream ss(str);
     std::string word;
     while (!ss.eof()) {
         std::getline(ss, word, ',');
-        ret.push_back(std::atoi(word.c_str()));
+        ret.push_back((T)std::atoi(word.c_str()));
     }
     return ret;
 }
@@ -800,6 +838,11 @@ int main(int argc, char** argv)
         .implicit_value(true)
         .help("measure rtt");
 
+    program.add_argument("--port_change_interval")
+        .default_value<uint32_t>(1024)
+        .help("specify the port changing interval")
+        .scan<'u', uint32_t>();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -808,7 +851,7 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    std::vector<int> dev_mlx_port_ids = split_int(program.get<std::string>("--dev_port_id"));
+    std::vector<int> dev_mlx_port_ids = split_int<int>(program.get<std::string>("--dev_port_id"));
     std::vector<std::string> dev_pci_addrs = convert_to_pci_addr(dev_mlx_port_ids);
     std::string lcores = program.get<std::string>("--lcores");
     std::string iova_mode = program.get<std::string>("--iova_mode");
@@ -816,13 +859,14 @@ int main(int argc, char** argv)
     std::vector<std::string> client_eth_addrs = split(program.get<std::string>("--client_eth_addr"));
     std::vector<std::string> server_ip_addrs = split(program.get<std::string>("--server_ip_addr"));
     std::vector<std::string> client_ip_addrs = split(program.get<std::string>("--client_ip_addr"));
-    std::vector<std::string> server_udp_ports = split(program.get<std::string>("--server_udp_port"));
+    std::vector<std::string> server_udp_ports = split(program.get<std::string>("--server_udp_port"), ':');
     std::vector<std::string> client_udp_ports = split(program.get<std::string>("--client_udp_port"));
     uint32_t bandwidth_in_gbps = program.get<uint32_t>("--bandwidth");
     std::string log_level = program.get<std::string>("--log_level");
     size_t frame_size = program.get<size_t>("--frame_size");
     uint32_t frame_num = program.get<uint32_t>("--frame_num");
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
+    uint32_t port_change_interval = program.get<uint32_t>("--port_change_interval");
     bool is_rtt = program.get<bool>("--is_rtt");
 
     auto socket_mem = get_socket_mem(lcores);
@@ -830,7 +874,7 @@ int main(int argc, char** argv)
     // dpdk uses 0-indexed port id.
     // when dev_mlx_port_ids is 1,4,3, dpdk rename it to 0,2,1
     std::vector<int> virtual_dev_port_ids = calc_virtual_dev_port_ids(dev_mlx_port_ids);
-    auto core_v = split_int(lcores);
+    auto core_v = split_int<int>(lcores);
 
     std::vector<client_args> client_argses(core_v.size());
     // char* aba = "123456789abcdefghijklmnopqrstuvwxyz\n";
@@ -842,13 +886,14 @@ int main(int argc, char** argv)
         client_argses.at(i).client_eth_addr = client_eth_addrs.at(i);
         client_argses.at(i).server_ip_addr = server_ip_addrs.at(i);
         client_argses.at(i).client_ip_addr = client_ip_addrs.at(i);
-        client_argses.at(i).server_port = std::stoi(server_udp_ports.at(i));
+        client_argses.at(i).server_ports = split_int<uint16_t>(server_udp_ports.at(i));
         client_argses.at(i).client_port = std::stoi(client_udp_ports.at(i));
         client_argses.at(i).bandwidth_in_gbps = bandwidth_in_gbps;
         client_argses.at(i).send_buf = std::vector<uint8_t>(frame_size);
         // memcpy(&client_argses.at(i).send_buf[0], aba, frame_size);
         client_argses.at(i).send_buf_num = frame_num;
         client_argses.at(i).chunk_size = chunk_size;
+        client_argses.at(i).port_change_interval = port_change_interval;
     }
 
     std::sort(client_argses.begin(), client_argses.end(),
