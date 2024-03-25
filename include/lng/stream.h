@@ -9,7 +9,13 @@
 struct rte_mbuf;
 struct rte_mempool;
 
+struct doca_gpu;
+struct doca_dev;
+struct doca_flow_port;
+
 namespace lng {
+
+struct rxq_udp_queues;
 
 template <typename T>
 class Stream {
@@ -60,6 +66,37 @@ class DPDKStream : public Stream<rte_mbuf*> {
 public:
     DPDKStream(uint16_t port_id)
         : impl_(new Impl(port_id))
+    {
+    }
+
+    virtual void put(rte_mbuf* v);
+
+    virtual bool get(rte_mbuf** vp);
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+#endif
+
+#if defined(LNG_WITH_DOCA)
+
+class DOCAStream : public Stream<rte_mbuf*> {
+
+    struct Impl {
+        struct doca_gpu* gpu_dev;
+        struct doca_dev* ddev;
+        struct doca_flow_port* df_port;
+        std::unique_ptr<struct rxq_udp_queues> udp_queues;
+        uint16_t port_id;
+
+        Impl(std::string nic_addr, std::string gpu_addr);
+        ~Impl();
+    };
+
+public:
+    DOCAStream(std::string nic_addr, std::string gpu_addr)
+        : impl_(new Impl(nic_addr, gpu_addr))
     {
     }
 

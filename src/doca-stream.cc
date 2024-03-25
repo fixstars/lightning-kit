@@ -1,0 +1,105 @@
+#if defined(LNG_WITH_DOCA) || defined(LNG_WITH_DPDK)
+
+#include "lng/lng.h"
+#include "lng/stream.h"
+
+#include "log.h"
+
+#include <doca_buf_array.h>
+#include <doca_dpdk.h>
+#include <doca_error.h>
+#include <doca_eth_rxq.h>
+#include <doca_eth_txq.h>
+#include <doca_flow.h>
+#include <doca_gpunetio.h>
+#include <doca_log.h>
+#include <doca_version.h>
+
+#include <rte_ethdev.h>
+
+namespace lng {
+
+DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
+{
+
+    doca_error_t result;
+    result = init_doca_device(nic_addr.c_str(), &ddev, &port_id);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function init_doca_device returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    /* Initialize DOCA GPU instance */
+    result = doca_gpu_create(gpu_addr.c_str(), &gpu_dev);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function doca_gpu_create returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    int queue_num = 1;
+
+    df_port = init_doca_udp_flow(port_id, queue_num);
+    if (df_port == NULL) {
+        throw std::runtime_error("FAILED: init_doca_flow");
+    }
+
+    udp_queues.reset(new struct rxq_udp_queues);
+
+    result = create_udp_queues(udp_queues.get(), df_port, gpu_dev, ddev, queue_num, SEMAPHORES_PER_QUEUE);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function create_udp_queues returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    /* Create root control pipe to route tcp/udp/OS packets */
+    result = create_udp_root_pipe(udp_queues.get(), df_port);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
+    }
+}
+
+DOCAStream::Impl::~Impl()
+{
+    doca_error_t result;
+    result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function finialize_doca_flow returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    result = doca_gpu_destroy(gpu_dev);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Failed to destroy GPU: " + std::string(doca_error_get_descr(result)));
+    }
+}
+
+void DOCAStream::put(rte_mbuf* v)
+{
+    // auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
+    // if (nb != 1) {
+    //     throw std::runtime_error("rte_eth_tx_burst");
+    // }
+}
+
+bool DOCAStream::get(rte_mbuf** vp)
+{
+    // if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
+    //     return false;
+    // }
+    return true;
+}
+
+/**
+
+Impl plan
+
+put get model does not suit for doca semaphore model.
+I think the reason why nvidia implements semaphoe is that launching kernel is costly and they wants to avoid it.
+But we don't want semaphore model as our interface.
+So I will use semaphore model in performance sensitive part, and use put get model in other part.
+
+recv_kernel(gpu) <--semaphore--> frame_builder(gpu) <--semaphore--> get(cpu)
+
+put(cpu) <--semaphore--> send_kernel(gpu)
+
+*/
+
+} // lng
+
+#endif
