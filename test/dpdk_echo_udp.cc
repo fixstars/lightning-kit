@@ -80,11 +80,11 @@ int main()
         MemoryStream<rte_mbuf*> inner_stream;
 
         auto receiver(sys.create_actor<Receiver>("/receiver",
-            reinterpret_cast<Stream<rte_mbuf*>*>(&inner_stream),
-            reinterpret_cast<Stream<rte_mbuf*>*>(&outer_stream)));
+            &inner_stream,
+            &outer_stream));
         auto sender(sys.create_actor<Sender>("/sender",
-            reinterpret_cast<Stream<rte_mbuf*>*>(&inner_stream),
-            reinterpret_cast<Stream<rte_mbuf*>*>(&outer_stream)));
+            &inner_stream,
+            &outer_stream));
 
         sys.start();
 

@@ -19,7 +19,7 @@ public:
 };
 
 template <typename T>
-class MemoryStream {
+class MemoryStream : public Stream<T> {
 
     struct Impl {
         moodycamel::ConcurrentQueue<T> queue;
