@@ -8,32 +8,39 @@
 using namespace std::chrono_literals;
 using namespace lng;
 
-template<typename T>
+template <typename T>
 class Producer : public Actor {
 public:
-    Producer(const std::string& id, Stream<T> *s)
-        : Actor(id), stream_(s), v_(0)
-    {}
+    Producer(const std::string& id, Stream<T>* s)
+        : Actor(id)
+        , stream_(s)
+        , v_(0)
+    {
+    }
 
 protected:
-    virtual void main() override {
+    virtual void main() override
+    {
         stream_->put(v_++);
     }
 
 private:
-    Stream<T> *stream_;
+    Stream<T>* stream_;
     int v_;
 };
 
-template<typename T>
+template <typename T>
 class Consumer : public Actor {
 public:
-    Consumer(const std::string& id, Stream<T> *s)
-        : Actor(id), stream_(s)
-    {}
+    Consumer(const std::string& id, Stream<T>* s)
+        : Actor(id)
+        , stream_(s)
+    {
+    }
 
 protected:
-    virtual void main() override {
+    virtual void main() override
+    {
         int v = 0;
         if (stream_->get(&v)) {
             std::cout << "Consuming " << v << std::endl;
@@ -41,7 +48,7 @@ protected:
     }
 
 private:
-    Stream<T> *stream_;
+    Stream<T>* stream_;
 };
 
 int main()

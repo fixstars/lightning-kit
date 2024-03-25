@@ -11,15 +11,14 @@ struct rte_mempool;
 
 namespace lng {
 
-template<typename T>
+template <typename T>
 class Stream {
 public:
     virtual void put(T v) = 0;
-    virtual bool get(T *vp) = 0;
+    virtual bool get(T* vp) = 0;
 };
 
-
-template<typename T>
+template <typename T>
 class MemoryStream {
 
     struct Impl {
@@ -29,13 +28,16 @@ class MemoryStream {
 public:
     MemoryStream()
         : impl_(new Impl)
-    {}
+    {
+    }
 
-    virtual void put(T v) {
+    virtual void put(T v)
+    {
         impl_->queue.enqueue(v);
     }
 
-    virtual bool get(T *vp) {
+    virtual bool get(T* vp)
+    {
         return impl_->queue.try_dequeue(*vp);
     }
 
@@ -43,13 +45,12 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
-
 #if defined(LNG_WITH_DOCA) || defined(LNG_WITH_DPDK)
 
 class DPDKStream : public Stream<rte_mbuf*> {
 
     struct Impl {
-        rte_mempool *mbuf_pool;
+        rte_mempool* mbuf_pool;
         uint16_t port_id;
 
         Impl(uint16_t port_id);
@@ -57,11 +58,14 @@ class DPDKStream : public Stream<rte_mbuf*> {
     };
 
 public:
-    DPDKStream(uint16_t port_id) : impl_(new Impl(port_id)) { }
+    DPDKStream(uint16_t port_id)
+        : impl_(new Impl(port_id))
+    {
+    }
 
-    virtual void put(rte_mbuf *v);
+    virtual void put(rte_mbuf* v);
 
-    virtual bool get(rte_mbuf **vp);
+    virtual bool get(rte_mbuf** vp);
 
 private:
     std::shared_ptr<Impl> impl_;
