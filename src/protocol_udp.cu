@@ -297,15 +297,15 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     cudaMemset(is_fin, 0, sizeof(int));
 
     cuda_kernel_receive_udp<<<2, CUDA_THREADS>>>(
-        udp_queues->eth_rxq_gpu[0],
+        udp_queues->rxq[0].eth_rxq_gpu,
         udp_queues->nums,
-        udp_queues->sem_gpu[0], is_fin, true);
+        udp_queues->sem[0].sem_gpu, is_fin, true);
     cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
         tar_buf, size, pitch, first_ackn,
         tmp_buf,
-        udp_queues->eth_rxq_gpu[0],
+        udp_queues->rxq[0].eth_rxq_gpu,
         udp_queues->nums,
-        udp_queues->sem_gpu[0], is_fin, true);
+        udp_queues->sem[0].sem_gpu, is_fin, true);
 
     cudaStream_t streams[2];
 
@@ -315,9 +315,9 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     /* Assume MAX_QUEUES == 4 */
     DOCA_LOG_INFO("kernel_receive_udp block %d thread %d %d", udp_queues->numq, CUDA_THREADS, static_cast<int>(sizeof(struct tcp_hdr) + sizeof(struct ipv4_hdr)));
     cuda_kernel_receive_udp<<<2, CUDA_THREADS, 0, streams[0]>>>(
-        udp_queues->eth_rxq_gpu[0],
+        udp_queues->rxq[0].eth_rxq_gpu,
         udp_queues->nums,
-        udp_queues->sem_gpu[0], is_fin, false);
+        udp_queues->sem[0].sem_gpu, is_fin, false);
     result = cudaGetLastError();
     if (cudaSuccess != result) {
         DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));
@@ -327,9 +327,9 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     cuda_kernel_makeframe<<<1, CUDA_THREADS, 0, streams[1]>>>(
         tar_buf, size, pitch, first_ackn,
         tmp_buf,
-        udp_queues->eth_rxq_gpu[0],
+        udp_queues->rxq[0].eth_rxq_gpu,
         udp_queues->nums,
-        udp_queues->sem_gpu[0], is_fin, false);
+        udp_queues->sem[0].sem_gpu, is_fin, false);
     result = cudaGetLastError();
     if (cudaSuccess != result) {
         DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));

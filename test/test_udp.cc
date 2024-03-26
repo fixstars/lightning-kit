@@ -22,7 +22,7 @@ int main()
         static struct doca_flow_port* df_port;
         static struct rxq_udp_queues udp_queues;
 
-        result = init_doca_device("a1:00.0", &ddev, &dpdk_dev_port_id);
+        result = init_doca_device("a1:00.1", &ddev, &dpdk_dev_port_id);
         if (result != DOCA_SUCCESS) {
             throw std::runtime_error("Function init_doca_device returned " + std::string(doca_error_get_descr(result)));
             return EXIT_FAILURE;

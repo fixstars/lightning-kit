@@ -111,6 +111,21 @@ struct tx_buf {
     struct doca_gpu_buf_arr* buf_arr_gpu; /* DOCA buffer array GPU handle */
 };
 
+struct semaphore {
+    struct doca_gpu_semaphore* sem_cpu;
+    struct doca_gpu_semaphore_gpu* sem_gpu;
+};
+
+struct rx_queue {
+    struct doca_ctx* eth_rxq_ctx;
+    struct doca_eth_rxq* eth_rxq_cpu;
+    struct doca_gpu_eth_rxq* eth_rxq_gpu;
+    struct doca_mmap* pkt_buff_mmap;
+    void* gpu_pkt_addr;
+    int dmabuf_fd;
+    struct doca_gpu* gpu_dev;
+};
+
 struct rxq_tcp_queues {
     struct doca_gpu* gpu_dev; /* GPUNetio handler associated to queues */
     struct doca_dev* ddev; /* DOCA device handler associated to queues */
@@ -162,12 +177,8 @@ struct rxq_udp_queues {
     struct doca_dev* ddev; /* DOCA device handler associated to queues */
 
     uint16_t numq; /* Number of queues */
-    struct doca_ctx* eth_rxq_ctx[MAX_QUEUES]; /* DOCA Ethernet receive queue context */
-    struct doca_eth_rxq* eth_rxq_cpu[MAX_QUEUES]; /* DOCA Ethernet receive queue CPU handler */
-    struct doca_gpu_eth_rxq* eth_rxq_gpu[MAX_QUEUES]; /* DOCA Ethernet receive queue GPU handler */
-    int dmabuf_fd[MAX_QUEUES]; /* GPU memory dmabuf file descriptor */
-    struct doca_mmap* pkt_buff_mmap[MAX_QUEUES]; /* DOCA mmap to receive packet with DOCA Ethernet queue */
-    void* gpu_pkt_addr[MAX_QUEUES]; /* DOCA mmap GPU memory address */
+
+    rx_queue rxq[MAX_QUEUES];
 
     struct doca_flow_port* port; /* DOCA Flow port */
     struct doca_flow_pipe* rxq_pipe; /* DOCA Flow receive pipe */
@@ -175,8 +186,8 @@ struct rxq_udp_queues {
     struct doca_flow_pipe_entry* root_udp_entry; /* DOCA Flow root entry */
 
     uint16_t nums; /* Number of semaphores items */
-    struct doca_gpu_semaphore* sem_cpu[MAX_QUEUES]; /* One semaphore per queue, CPU handler*/
-    struct doca_gpu_semaphore_gpu* sem_gpu[MAX_QUEUES]; /* One semaphore per queue, GPU handler*/
+
+    semaphore sem[MAX_QUEUES];
 };
 
 struct sem_pair {
@@ -236,6 +247,12 @@ create_tcp_root_pipe(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* p
 
 doca_error_t
 create_udp_root_pipe(struct rxq_udp_queues* udp_queues, struct doca_flow_port* port);
+doca_error_t
+create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port);
+
+doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);
+doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num);
+doca_error_t create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_flow_port* port, int numq);
 
 doca_error_t
 destroy_tcp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,

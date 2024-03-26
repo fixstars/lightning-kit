@@ -41,15 +41,15 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         throw std::runtime_error("FAILED: init_doca_flow");
     }
 
-    udp_queues.reset(new struct rxq_udp_queues);
+    rxq.reset(new struct rx_queue);
+    sem.reset(new struct semaphore);
 
-    result = create_udp_queues(udp_queues.get(), df_port, gpu_dev, ddev, queue_num, SEMAPHORES_PER_QUEUE);
-    if (result != DOCA_SUCCESS) {
-        throw std::runtime_error("Function create_udp_queues returned " + std::string(doca_error_get_descr(result)));
-    }
+    create_rx_queue(rxq.get(), gpu_dev, ddev);
+    create_semaphore(sem.get(), gpu_dev, SEMAPHORES_PER_QUEUE);
+    create_udp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
 
     /* Create root control pipe to route tcp/udp/OS packets */
-    result = create_udp_root_pipe(udp_queues.get(), df_port);
+    result = create_udp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe, df_port);
     if (result != DOCA_SUCCESS) {
         throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
     }
@@ -58,10 +58,10 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 DOCAStream::Impl::~Impl()
 {
     doca_error_t result;
-    result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
-    if (result != DOCA_SUCCESS) {
-        throw std::runtime_error("Function finialize_doca_flow returned " + std::string(doca_error_get_descr(result)));
-    }
+    // result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
+    // if (result != DOCA_SUCCESS) {
+    //     throw std::runtime_error("Function finialize_doca_flow returned " + std::string(doca_error_get_descr(result)));
+    // }
 
     result = doca_gpu_destroy(gpu_dev);
     if (result != DOCA_SUCCESS) {
