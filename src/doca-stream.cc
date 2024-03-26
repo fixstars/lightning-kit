@@ -3,6 +3,8 @@
 #include "lng/lng.h"
 #include "lng/stream.h"
 
+#include "lng/doca-kernels.h"
+
 #include "log.h"
 
 #include <doca_buf_array.h>
@@ -53,6 +55,11 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     if (result != DOCA_SUCCESS) {
         throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
     }
+
+    std::vector<cudaStream_t> streams;
+
+    init_udp_kernels(rxq.get(), sem.get(), streams);
+    launch_udp_kernels(rxq.get(), sem.get(), streams);
 }
 
 DOCAStream::Impl::~Impl()

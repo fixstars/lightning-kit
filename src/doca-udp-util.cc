@@ -287,6 +287,8 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
         return DOCA_ERROR_BAD_STATE;
     }
 
+    sem->sem_num = sem_num;
+
     /*
      * Semaphore memory reside on CPU visibile from GPU.
      * CPU will poll in busy wait on this semaphore (multiple reads)

@@ -12,6 +12,8 @@ struct rte_mempool;
 struct doca_gpu;
 struct doca_dev;
 struct doca_flow_port;
+struct doca_flow_pipe;
+struct doca_flow_pipe_entry;
 
 namespace lng {
 

@@ -7,6 +7,8 @@
 
 #include "lng/doca-util.h"
 
+#include <vector>
+
 DOCA_LOG_REGISTER(PROT_UDP);
 
 namespace lng {
@@ -24,7 +26,7 @@ __global__ void cuda_kernel_receive_udp(
     struct doca_gpu_eth_rxq* rxq,
     int sem_num,
     struct doca_gpu_semaphore_gpu* sem_recvinfo,
-    int* is_fin, bool is_warmup)
+    bool is_warmup)
 {
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -64,7 +66,7 @@ __global__ void cuda_kernel_receive_udp(
 
     if (blockIdx.x == 0) {
 
-        while (!(*is_fin)) {
+        while (true) {
 
             ret = doca_gpu_dev_eth_rxq_receive_block(rxq, max_pkts, timeout_ns, &rx_pkt_num, &rx_buf_idx);
             /* If any thread returns receive error, the whole execution stops */
@@ -121,7 +123,7 @@ __global__ void cuda_kernel_makeframe(
     struct doca_gpu_eth_rxq* rxq,
     int sem_num,
     struct doca_gpu_semaphore_gpu* sem_recvinfo,
-    int* is_fin, bool is_warmup)
+    bool is_warmup)
 {
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -163,7 +165,7 @@ __global__ void cuda_kernel_makeframe(
     __shared__ enum doca_gpu_semaphore_status status;
     __shared__ enum doca_gpu_semaphore_status status_frame;
 
-    while ((!quit) && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
+    while (!quit) {
 
         if (threadIdx.x == 0) {
             while (!packet_reached) {
@@ -266,8 +268,43 @@ __global__ void cuda_kernel_makeframe(
     }
 }
 
-extern "C" {
+void init_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
+    std::vector<cudaStream_t>& streams)
+{
+    cuda_kernel_receive_udp<<<1, CUDA_THREADS>>>(
+        rxq->eth_rxq_gpu,
+        sem->sem_num,
+        sem->sem_gpu, true);
+    cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
+        NULL, 0, 0, NULL,
+        NULL,
+        rxq->eth_rxq_gpu,
+        sem->sem_num,
+        sem->sem_gpu, true);
 
+    streams.resize(2);
+
+    cudaStreamCreate(&streams[0]);
+    cudaStreamCreate(&streams[1]);
+}
+
+void launch_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
+    std::vector<cudaStream_t>& streams)
+{
+    cuda_kernel_receive_udp<<<1, CUDA_THREADS, 0, streams.at(0)>>>(
+        rxq->eth_rxq_gpu,
+        sem->sem_num,
+        sem->sem_gpu, false);
+
+    cuda_kernel_makeframe<<<1, CUDA_THREADS, 0, streams.at(1)>>>(
+        NULL, 0, 0, NULL,
+        NULL,
+        rxq->eth_rxq_gpu,
+        sem->sem_num,
+        sem->sem_gpu, false);
+}
+
+extern "C" {
 doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch)
 {
@@ -292,49 +329,15 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     cudaMalloc((void**)&tmp_buf, size);
     uint32_t* first_ackn;
     cudaMalloc((void**)&first_ackn, sizeof(uint32_t));
-    int* is_fin;
-    cudaMalloc((void**)&is_fin, sizeof(int));
-    cudaMemset(is_fin, 0, sizeof(int));
 
-    cuda_kernel_receive_udp<<<2, CUDA_THREADS>>>(
-        udp_queues->rxq[0].eth_rxq_gpu,
-        udp_queues->nums,
-        udp_queues->sem[0].sem_gpu, is_fin, true);
-    cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
-        tar_buf, size, pitch, first_ackn,
-        tmp_buf,
-        udp_queues->rxq[0].eth_rxq_gpu,
-        udp_queues->nums,
-        udp_queues->sem[0].sem_gpu, is_fin, true);
+    std::vector<cudaStream_t> streams(2);
 
-    cudaStream_t streams[2];
-
-    cudaStreamCreate(&streams[0]);
-    cudaStreamCreate(&streams[1]);
+    init_udp_kernels(udp_queues->rxq, udp_queues->sem, streams);
 
     /* Assume MAX_QUEUES == 4 */
     DOCA_LOG_INFO("kernel_receive_udp block %d thread %d %d", udp_queues->numq, CUDA_THREADS, static_cast<int>(sizeof(struct tcp_hdr) + sizeof(struct ipv4_hdr)));
-    cuda_kernel_receive_udp<<<2, CUDA_THREADS, 0, streams[0]>>>(
-        udp_queues->rxq[0].eth_rxq_gpu,
-        udp_queues->nums,
-        udp_queues->sem[0].sem_gpu, is_fin, false);
-    result = cudaGetLastError();
-    if (cudaSuccess != result) {
-        DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
 
-    cuda_kernel_makeframe<<<1, CUDA_THREADS, 0, streams[1]>>>(
-        tar_buf, size, pitch, first_ackn,
-        tmp_buf,
-        udp_queues->rxq[0].eth_rxq_gpu,
-        udp_queues->nums,
-        udp_queues->sem[0].sem_gpu, is_fin, false);
-    result = cudaGetLastError();
-    if (cudaSuccess != result) {
-        DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
+    launch_udp_kernels(udp_queues->rxq, udp_queues->sem, streams);
 
     cudaStreamSynchronize(streams[0]);
     cudaStreamSynchronize(streams[1]);
@@ -344,6 +347,6 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
 
     return DOCA_SUCCESS;
 }
+}
 
-} /* extern C */
 }

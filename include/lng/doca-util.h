@@ -114,6 +114,7 @@ struct tx_buf {
 struct semaphore {
     struct doca_gpu_semaphore* sem_cpu;
     struct doca_gpu_semaphore_gpu* sem_gpu;
+    int sem_num;
 };
 
 struct rx_queue {
