@@ -22,6 +22,7 @@
 namespace lng {
 
 DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
+    : sem_fr_idx(0)
 {
 
     doca_error_t result;
@@ -44,10 +45,12 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     }
 
     rxq.reset(new struct rx_queue);
-    sem.reset(new struct semaphore);
+    sem_rx.reset(new struct semaphore);
+    sem_fr.reset(new struct semaphore);
 
     create_rx_queue(rxq.get(), gpu_dev, ddev);
-    create_semaphore(sem.get(), gpu_dev, SEMAPHORES_PER_QUEUE);
+    create_semaphore(sem_rx.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
+    create_semaphore(sem_fr.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct fr_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
     create_udp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
 
     /* Create root control pipe to route tcp/udp/OS packets */
@@ -58,8 +61,8 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 
     std::vector<cudaStream_t> streams;
 
-    init_udp_kernels(rxq.get(), sem.get(), streams);
-    launch_udp_kernels(rxq.get(), sem.get(), streams);
+    init_udp_kernels(streams);
+    launch_udp_kernels(rxq.get(), sem_rx.get(), sem_fr.get(), streams);
 }
 
 DOCAStream::Impl::~Impl()
@@ -76,20 +79,38 @@ DOCAStream::Impl::~Impl()
     }
 }
 
-void DOCAStream::put(rte_mbuf* v)
+bool DOCAStream::Impl::put(uint8_t** v, size_t count)
 {
     // auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
     // if (nb != 1) {
     //     throw std::runtime_error("rte_eth_tx_burst");
     // }
+    return false;
 }
 
-bool DOCAStream::get(rte_mbuf** vp)
+size_t DOCAStream::Impl::get(uint8_t*** vp, size_t max)
 {
-    // if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
-    //     return false;
-    // }
-    return true;
+    size_t ret = 0;
+    struct fr_info* fr_info_global;
+    enum doca_gpu_semaphore_status status;
+
+    for (; ret < max; ++ret) {
+        uint32_t sem_idx = (sem_fr_idx + ret) % sem_fr->sem_num;
+        doca_gpu_semaphore_get_status(sem_fr->sem_cpu, sem_idx, &status);
+        if (status != DOCA_GPU_SEMAPHORE_STATUS_READY) {
+            break;
+        } else {
+            doca_gpu_semaphore_get_custom_info_addr(sem_fr->sem_cpu, sem_idx, (void**)&(fr_info_global));
+            vp_internal[ret] = fr_info_global->eth_payload;
+            doca_gpu_semaphore_set_status(sem_fr->sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+        }
+    }
+
+    *vp = vp_internal;
+
+    sem_fr_idx = (sem_fr_idx + ret) % sem_fr->sem_num;
+
+    return ret;
 }
 
 /**

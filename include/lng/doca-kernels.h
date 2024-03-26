@@ -7,11 +7,12 @@
 
 #include "stream.h"
 
-namespace lng{
+namespace lng {
 
-void init_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
-    std::vector<cudaStream_t>& streams);
-void launch_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
+void init_udp_kernels(std::vector<cudaStream_t>& streams);
+void launch_udp_kernels(struct rx_queue* rxq,
+    struct semaphore* sem_rx,
+    struct semaphore* sem_fr,
     std::vector<cudaStream_t>& streams);
 }
 

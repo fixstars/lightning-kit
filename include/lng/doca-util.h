@@ -211,6 +211,10 @@ struct rx_info {
     uint32_t cur_ackn;
 };
 
+struct fr_info {
+    uint8_t* eth_payload;
+};
+
 struct store_buf_info {
     uint8_t* buf;
     uint64_t size;
@@ -252,7 +256,7 @@ doca_error_t
 create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port);
 
 doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);
-doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num);
+doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num, int element_size, enum doca_gpu_mem_type mem_type);
 doca_error_t create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_flow_port* port, int numq);
 
 doca_error_t

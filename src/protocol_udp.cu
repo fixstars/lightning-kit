@@ -55,6 +55,8 @@ __global__ void cuda_kernel_receive_udp(
     uint64_t timeout_ns;
     uint64_t doca_gpu_buf_idx = laneId;
 
+    __shared__ enum doca_gpu_semaphore_status rx_status;
+
     max_pkts = MAX_RX_NUM_PKTS;
     timeout_ns = MAX_RX_TIMEOUT_NS;
 
@@ -91,24 +93,33 @@ __global__ void cuda_kernel_receive_udp(
 
             if (threadIdx.x == 0 && rx_pkt_num > 0) {
 
-                ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_recvinfo, sem_stats_idx, (void**)&rx_info_global);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP Error %d doca_gpu_dev_semaphore_get_custom_info_addr block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
-                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
-                    break;
-                }
-                DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_pkt_num) = DOCA_GPUNETIO_VOLATILE(rx_pkt_num);
-                DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_buf_idx) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx);
-                // printf("%d rx_pkt_num recv\n", rx_pkt_num);
-                // printf("%d rx_buf_idx recv\n", rx_buf_idx);
+                while (true) {
+                    doca_gpu_dev_semaphore_get_status(sem_recvinfo, sem_stats_idx, &rx_status);
 
-                // __threadfence();
-                doca_gpu_dev_semaphore_set_status(sem_recvinfo, sem_stats_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP semaphore recv error\n");
-                    return;
+                    if (rx_status == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
+                        ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_recvinfo, sem_stats_idx, (void**)&rx_info_global);
+                        if (ret != DOCA_SUCCESS) {
+                            printf("TCP Error %d doca_gpu_dev_semaphore_get_custom_info_addr block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                            // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                            break;
+                        }
+                        DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_pkt_num) = DOCA_GPUNETIO_VOLATILE(rx_pkt_num);
+                        DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_buf_idx) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx);
+                        // printf("%d rx_pkt_num recv\n", rx_pkt_num);
+                        // printf("%d rx_buf_idx recv\n", rx_buf_idx);
+
+                        // __threadfence();
+                        doca_gpu_dev_semaphore_set_status(sem_recvinfo, sem_stats_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
+                        if (ret != DOCA_SUCCESS) {
+                            printf("TCP semaphore recv error\n");
+                            return;
+                        }
+                        __threadfence_system();
+                        break;
+                    } else {
+                        printf("not good to reach here\n");
+                    }
                 }
-                __threadfence_system();
 
                 sem_stats_idx = (sem_stats_idx + 1) % sem_num;
             }
@@ -118,11 +129,9 @@ __global__ void cuda_kernel_receive_udp(
 }
 
 __global__ void cuda_kernel_makeframe(
-    uint8_t* tar_buf, uint64_t tar_buf_total_size, uint64_t pitch, uint32_t* first_ackn,
-    uint8_t* tmp_buf,
     struct doca_gpu_eth_rxq* rxq,
-    int sem_num,
-    struct doca_gpu_semaphore_gpu* sem_recvinfo,
+    int sem_rx_num, struct doca_gpu_semaphore_gpu* sem_rx_recvinfo,
+    int sem_fr_num, struct doca_gpu_semaphore_gpu* sem_fr_recvinfo,
     bool is_warmup)
 {
     if (is_warmup) {
@@ -144,16 +153,19 @@ __global__ void cuda_kernel_makeframe(
     doca_error_t ret;
     struct doca_gpu_buf* buf_ptr;
     struct rx_info* rx_info_global;
+    struct fr_info* fr_info_global;
     struct eth_ip_udp_hdr* hdr;
     uintptr_t buf_addr;
-    uint32_t sem_recvinfo_idx = 0;
+    uint32_t sem_rx_recvinfo_idx = 0;
+    __shared__ uint32_t sem_fr_recvinfo_idx;
     uint8_t* payload;
-    __shared__ bool quit;
+    __shared__ bool all_frame_done;
 
     if (threadIdx.x == 0) {
         frame_head = 0;
         packet_reached = false;
-        quit = false;
+        all_frame_done = false;
+        sem_fr_recvinfo_idx = 0;
     }
 
     if (blockIdx.x != 0) {
@@ -162,21 +174,21 @@ __global__ void cuda_kernel_makeframe(
 
     __syncthreads();
 
-    __shared__ enum doca_gpu_semaphore_status status;
-    __shared__ enum doca_gpu_semaphore_status status_frame;
+    __shared__ enum doca_gpu_semaphore_status rx_status;
+    __shared__ enum doca_gpu_semaphore_status fr_status;
 
-    while (!quit) {
+    while (true) {
 
         if (threadIdx.x == 0) {
             while (!packet_reached) {
-                ret = doca_gpu_dev_semaphore_get_status(sem_recvinfo, sem_recvinfo_idx, &status);
+                ret = doca_gpu_dev_semaphore_get_status(sem_rx_recvinfo, sem_rx_recvinfo_idx, &rx_status);
                 if (ret != DOCA_SUCCESS) {
                     printf("TCP semaphore error");
                     return;
                 }
-                if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
+                if (rx_status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
 
-                    ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_recvinfo, sem_recvinfo_idx, (void**)&(rx_info_global));
+                    ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_rx_recvinfo, sem_rx_recvinfo_idx, (void**)&(rx_info_global));
                     if (ret != DOCA_SUCCESS) {
                         printf("TCP semaphore get address error\n");
                         return;
@@ -190,7 +202,7 @@ __global__ void cuda_kernel_makeframe(
                     // printf("%d rx_pkt_num frame \n", rx_pkt_num);
                     // printf("%d rx_buf_idx frame \n", rx_buf_idx);
 
-                    ret = doca_gpu_dev_semaphore_set_status(sem_recvinfo, sem_recvinfo_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+                    ret = doca_gpu_dev_semaphore_set_status(sem_rx_recvinfo, sem_rx_recvinfo_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
                     if (ret != DOCA_SUCCESS) {
                         printf("TCP semaphore error\n");
                         return;
@@ -198,7 +210,7 @@ __global__ void cuda_kernel_makeframe(
                     __threadfence_system();
                     packet_reached = true;
 
-                    sem_recvinfo_idx = (sem_recvinfo_idx + 1) % sem_num;
+                    sem_rx_recvinfo_idx = (sem_rx_recvinfo_idx + 1) % sem_rx_num;
                 } else {
                     rx_pkt_num = 0;
                 }
@@ -212,75 +224,71 @@ __global__ void cuda_kernel_makeframe(
 
         __syncthreads();
 
-        {
+        uint32_t tail_sem_idx = (sem_fr_recvinfo_idx + rx_pkt_num - 1) % sem_fr_num;
 
-            for (uint64_t idx = rx_buf_idx + threadIdx.x; idx < rx_buf_idx + rx_pkt_num; idx += blockDim.x) {
-                ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx, &buf_ptr);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
-                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
-                    break;
+        while (!all_frame_done) {
+            ret = doca_gpu_dev_semaphore_get_status(sem_fr_recvinfo, tail_sem_idx, &fr_status);
+            if (ret != DOCA_SUCCESS) {
+                printf("fr semaphore failed.");
+                return;
+            }
+            if (fr_status == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
+                for (uint64_t idx = rx_buf_idx + threadIdx.x,
+                              sem_idx = sem_fr_recvinfo_idx + threadIdx.x;
+                     idx < rx_buf_idx + rx_pkt_num;
+                     idx += blockDim.x, sem_idx += blockDim.x) {
+                    ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx, &buf_ptr);
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                        // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                        break;
+                    }
+                    ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                        // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                        break;
+                    }
+
+                    ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_fr_recvinfo, sem_idx % sem_fr_num, (void**)&(fr_info_global));
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP semaphore get address error\n");
+                        return;
+                    }
+                    uint8_t* payload = (uint8_t*)buf_addr;
+
+                    DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload) = DOCA_GPUNETIO_VOLATILE(payload);
+
+                    __threadfence();
+
+                    // printf("%d rx_pkt_num frame \n", rx_pkt_num);
+                    // printf("%d rx_buf_idx frame \n", rx_buf_idx);
+
+                    ret = doca_gpu_dev_semaphore_set_status(sem_fr_recvinfo, sem_idx % sem_fr_num, DOCA_GPU_SEMAPHORE_STATUS_READY);
+
+                    // raw_to_udp(buf_addr, &hdr, &payload);
+                    // printf("%d l4_hdr\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
+                    // printf("%d l3_hdr\n", BYTE_SWAP16(hdr->l3_hdr.total_length));
                 }
-                ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
-                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
-                    break;
-                }
-                raw_to_udp(buf_addr, &hdr, &payload);
-                printf("%d l4_hdr\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
-                printf("%d l3_hdr\n", BYTE_SWAP16(hdr->l3_hdr.total_length));
-                // uint32_t sent_seq = BYTE_SWAP32(hdr->l4_hdr.sent_seq);
-                // uint32_t total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
-
-                // uint32_t offset = sent_seq - prev_ackn;
-                // uint64_t cur_head = frame_head + offset;
-
-                // if (cur_head + total_payload_size < tar_buf_total_size) {
-                //     uint32_t write_byte = total_payload_size;
-                //     uint8_t* data_head = tar_buf + cur_head;
-                //     memcpy(data_head, payload, write_byte);
-                // } else if (cur_head < tar_buf_total_size) {
-                //     uint32_t write_byte = tar_buf_total_size - cur_head;
-                //     uint8_t* data_head = tar_buf + cur_head;
-                //     memcpy(data_head, payload, write_byte);
-                //     memcpy(tmp_buf, payload + write_byte, total_payload_size - write_byte);
-                // } else {
-                //     uint32_t write_byte = total_payload_size;
-                //     uint8_t* data_head = tmp_buf + cur_head - tar_buf_total_size;
-                //     // printf("%d koko\n", (cur_head - tar_buf_total_size));
-                //     // memcpy(data_head, payload, write_byte);
-                // }
+                all_frame_done = true;
             }
         }
-        // __syncthreads();
-        // if (threadIdx.x == 0 && rx_pkt_num > 0) {
-        //     uint64_t bytes = (cur_ackn - prev_ackn);
-        //     frame_head += bytes;
-        //     if (frame_head > tar_buf_total_size) {
-        //         printf("%d frame made\n", frame_head);
-        //     }
-        //     prev_ackn = cur_ackn;
-        // }
 
         __syncthreads();
         packet_reached = false;
+        all_frame_done = false;
+        if (threadIdx.x == 0) {
+            sem_fr_recvinfo_idx = (sem_fr_recvinfo_idx + rx_pkt_num - 1) % sem_fr_num;
+        }
     }
 }
 
-void init_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
-    std::vector<cudaStream_t>& streams)
+void init_udp_kernels(std::vector<cudaStream_t>& streams)
 {
     cuda_kernel_receive_udp<<<1, CUDA_THREADS>>>(
-        rxq->eth_rxq_gpu,
-        sem->sem_num,
-        sem->sem_gpu, true);
+        nullptr, 0, nullptr, true);
     cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
-        NULL, 0, 0, NULL,
-        NULL,
-        rxq->eth_rxq_gpu,
-        sem->sem_num,
-        sem->sem_gpu, true);
+        nullptr, 0, nullptr, 0, nullptr, true);
 
     streams.resize(2);
 
@@ -288,20 +296,21 @@ void init_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
     cudaStreamCreate(&streams[1]);
 }
 
-void launch_udp_kernels(struct rx_queue* rxq, struct semaphore* sem,
+void launch_udp_kernels(struct rx_queue* rxq,
+    struct semaphore* sem_rx,
+    struct semaphore* sem_fr,
     std::vector<cudaStream_t>& streams)
 {
     cuda_kernel_receive_udp<<<1, CUDA_THREADS, 0, streams.at(0)>>>(
         rxq->eth_rxq_gpu,
-        sem->sem_num,
-        sem->sem_gpu, false);
+        sem_rx->sem_num,
+        sem_rx->sem_gpu, false);
 
     cuda_kernel_makeframe<<<1, CUDA_THREADS, 0, streams.at(1)>>>(
-        NULL, 0, 0, NULL,
-        NULL,
         rxq->eth_rxq_gpu,
-        sem->sem_num,
-        sem->sem_gpu, false);
+        sem_rx->sem_num, sem_rx->sem_gpu,
+        sem_fr->sem_num, sem_fr->sem_gpu,
+        false);
 }
 
 extern "C" {
@@ -332,12 +341,14 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
 
     std::vector<cudaStream_t> streams(2);
 
-    init_udp_kernels(udp_queues->rxq, udp_queues->sem, streams);
+    init_udp_kernels(streams);
 
     /* Assume MAX_QUEUES == 4 */
     DOCA_LOG_INFO("kernel_receive_udp block %d thread %d %d", udp_queues->numq, CUDA_THREADS, static_cast<int>(sizeof(struct tcp_hdr) + sizeof(struct ipv4_hdr)));
 
-    launch_udp_kernels(udp_queues->rxq, udp_queues->sem, streams);
+    launch_udp_kernels(udp_queues->rxq, udp_queues->sem,
+        udp_queues->sem, // TODO
+        streams);
 
     cudaStreamSynchronize(streams[0]);
     cudaStreamSynchronize(streams[1]);

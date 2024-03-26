@@ -277,7 +277,7 @@ destroy_udp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     return DOCA_SUCCESS;
 }
 
-doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num)
+doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num, int element_size, enum doca_gpu_mem_type mem_type)
 {
     doca_error_t result;
     result = doca_gpu_semaphore_create(gpu_dev, &(sem->sem_cpu));
@@ -294,7 +294,7 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
      * CPU will poll in busy wait on this semaphore (multiple reads)
      * while GPU access each item only once to update values.
      */
-    result = doca_gpu_semaphore_set_memory_type(sem->sem_cpu, DOCA_GPU_MEM_TYPE_GPU);
+    result = doca_gpu_semaphore_set_memory_type(sem->sem_cpu, mem_type);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_memory_type: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
@@ -313,7 +313,7 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
      * The CPU reads packets info from this structure.
      * The GPU access each item only once to update values.
      */
-    result = doca_gpu_semaphore_set_custom_info(sem->sem_cpu, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_CPU_GPU);
+    result = doca_gpu_semaphore_set_custom_info(sem->sem_cpu, element_size, DOCA_GPU_MEM_TYPE_CPU_GPU);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_custom_info: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
@@ -480,7 +480,7 @@ create_udp_queues(struct rxq_udp_queues* udp_queues, struct doca_flow_port* df_p
 
         create_rx_queue(&(udp_queues->rxq[idx]), gpu_dev, ddev);
 
-        create_semaphore(&(udp_queues->sem[idx]), gpu_dev, sem_num);
+        create_semaphore(&(udp_queues->sem[idx]), gpu_dev, sem_num, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
     }
 
     /* Create UDP based flow pipe */
