@@ -3,6 +3,7 @@
 
 #include <cuda_runtime_api.h>
 
+#include "doca-common-util-internal.h"
 #include "lng/doca-util.h"
 
 DOCA_LOG_REGISTER(DOCA_UDP_UTIL);
@@ -189,52 +190,6 @@ create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
     return DOCA_SUCCESS;
 }
 
-doca_error_t destroy_semaphore(semaphore* sem)
-{
-    doca_error_t result;
-    result = doca_gpu_semaphore_stop(sem->sem_cpu);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_semaphore_destroy(sem->sem_cpu);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_destroy: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-    return result;
-}
-
-doca_error_t destroy_rx_queue(rx_queue* rxq)
-{
-    doca_error_t result;
-    result = doca_ctx_stop(rxq->eth_rxq_ctx);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_stop: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_eth_rxq_destroy(rxq->eth_rxq_cpu);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_destroy: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_mmap_destroy(rxq->pkt_buff_mmap);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to destroy mmap: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_mem_free(rxq->gpu_dev, rxq->gpu_pkt_addr);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to free gpu memory: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-    return result;
-}
-
 doca_error_t
 destroy_udp_queues(struct rxq_udp_queues* udp_queues)
 {
@@ -275,188 +230,6 @@ destroy_udp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     }
 
     return DOCA_SUCCESS;
-}
-
-doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num, int element_size, enum doca_gpu_mem_type mem_type)
-{
-    doca_error_t result;
-    result = doca_gpu_semaphore_create(gpu_dev, &(sem->sem_cpu));
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_create: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    sem->sem_num = sem_num;
-
-    /*
-     * Semaphore memory reside on CPU visibile from GPU.
-     * CPU will poll in busy wait on this semaphore (multiple reads)
-     * while GPU access each item only once to update values.
-     */
-    result = doca_gpu_semaphore_set_memory_type(sem->sem_cpu, mem_type);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_memory_type: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_semaphore_set_items_num(sem->sem_cpu, sem_num);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_items_num: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    /*
-     * Semaphore memory reside on CPU visibile from GPU.
-     * The CPU reads packets info from this structure.
-     * The GPU access each item only once to update values.
-     */
-    result = doca_gpu_semaphore_set_custom_info(sem->sem_cpu, element_size, DOCA_GPU_MEM_TYPE_CPU_GPU);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_custom_info: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_semaphore_start(sem->sem_cpu);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_semaphore_get_gpu_handle(sem->sem_cpu, &(sem->sem_gpu));
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_get_gpu_handle: %s", doca_error_get_descr(result));
-        destroy_semaphore(sem);
-        return DOCA_ERROR_BAD_STATE;
-    }
-    return result;
-}
-
-doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, struct doca_dev* ddev)
-{
-    uint32_t cyclic_buffer_size = 0;
-
-    rxq->gpu_dev = gpu_dev;
-
-    doca_error_t result;
-    result = doca_eth_rxq_create(ddev, MAX_PKT_NUM, MAX_PKT_SIZE, &(rxq->eth_rxq_cpu));
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_create: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_eth_rxq_set_type(rxq->eth_rxq_cpu, DOCA_ETH_RXQ_TYPE_CYCLIC);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_set_type: %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_eth_rxq_estimate_packet_buf_size(DOCA_ETH_RXQ_TYPE_CYCLIC, 0, 0, MAX_PKT_SIZE, MAX_PKT_NUM, 0, &cyclic_buffer_size);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to get eth_rxq cyclic buffer size: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_mmap_create(&rxq->pkt_buff_mmap);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create mmap: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_mmap_add_dev(rxq->pkt_buff_mmap, ddev);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to add dev to mmap: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_gpu_mem_alloc(gpu_dev, cyclic_buffer_size, GPU_PAGE_SIZE, DOCA_GPU_MEM_TYPE_GPU, &rxq->gpu_pkt_addr, NULL);
-    if (result != DOCA_SUCCESS || rxq->gpu_pkt_addr == NULL) {
-        DOCA_LOG_ERR("Failed to allocate gpu memory %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    /* Map GPU memory buffer used to receive packets with DMABuf */
-    result = doca_gpu_dmabuf_fd(gpu_dev, rxq->gpu_pkt_addr, cyclic_buffer_size, &(rxq->dmabuf_fd));
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_INFO("Mapping receive queue buffer (0x%p size %dB) with nvidia-peermem mode",
-            rxq->gpu_pkt_addr, cyclic_buffer_size);
-
-        /* If failed, use nvidia-peermem method */
-        result = doca_mmap_set_memrange(rxq->pkt_buff_mmap, rxq->gpu_pkt_addr, cyclic_buffer_size);
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Failed to set memrange for mmap %s", doca_error_get_descr(result));
-            destroy_rx_queue(rxq);
-            return DOCA_ERROR_BAD_STATE;
-        }
-    } else {
-        DOCA_LOG_INFO("Mapping receive queue buffer (0x%p size %dB dmabuf fd %d) with dmabuf mode",
-            rxq->gpu_pkt_addr, cyclic_buffer_size, rxq->dmabuf_fd);
-
-        result = doca_mmap_set_dmabuf_memrange(rxq->pkt_buff_mmap, rxq->dmabuf_fd, rxq->gpu_pkt_addr, 0, cyclic_buffer_size);
-        if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Failed to set dmabuf memrange for mmap %s", doca_error_get_descr(result));
-            destroy_rx_queue(rxq);
-            return DOCA_ERROR_BAD_STATE;
-        }
-    }
-
-    result = doca_mmap_set_permissions(rxq->pkt_buff_mmap, DOCA_ACCESS_FLAG_LOCAL_READ_WRITE | DOCA_ACCESS_FLAG_PCI_RELAXED_ORDERING);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set permissions for mmap %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_mmap_start(rxq->pkt_buff_mmap);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to start mmap %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_eth_rxq_set_pkt_buf(rxq->eth_rxq_cpu, rxq->pkt_buff_mmap, 0, cyclic_buffer_size);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set cyclic buffer  %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    rxq->eth_rxq_ctx = doca_eth_rxq_as_doca_ctx(rxq->eth_rxq_cpu);
-    if (rxq->eth_rxq_ctx == NULL) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_as_doca_ctx: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_ctx_set_datapath_on_gpu(rxq->eth_rxq_ctx, gpu_dev);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_set_datapath_on_gpu: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_ctx_start(rxq->eth_rxq_ctx);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_start: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    result = doca_eth_rxq_get_gpu_handle(rxq->eth_rxq_cpu, &(rxq->eth_rxq_gpu));
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_get_gpu_handle: %s", doca_error_get_descr(result));
-        destroy_rx_queue(rxq);
-        return DOCA_ERROR_BAD_STATE;
-    }
-    return result;
 }
 
 doca_error_t
@@ -550,6 +323,56 @@ doca_error_t
 create_udp_root_pipe(struct rxq_udp_queues* udp_queues, struct doca_flow_port* port)
 {
     return create_udp_root_pipe(&(udp_queues->root_pipe), &(udp_queues->root_udp_entry), udp_queues->rxq_pipe, port);
+}
+
+doca_error_t prepare_udp_tx_buf(struct tx_buf* buf)
+{
+    uint8_t* cpu_pkt_addr;
+    uint8_t* pkt;
+    struct eth_ip_udp_hdr* hdr;
+    const char* payload = "";
+    cudaError_t res_cuda;
+
+    buf->pkt_nbytes = strlen(payload);
+
+    cpu_pkt_addr = (uint8_t*)calloc(buf->num_packets * buf->max_pkt_sz, sizeof(uint8_t));
+    if (cpu_pkt_addr == NULL) {
+        DOCA_LOG_ERR("Error in txbuf preparation, failed to allocate memory");
+        return DOCA_ERROR_NO_MEMORY;
+    }
+
+    for (int idx = 0; idx < buf->num_packets; idx++) {
+        pkt = cpu_pkt_addr + (idx * buf->max_pkt_sz);
+        hdr = (struct eth_ip_udp_hdr*)pkt;
+
+        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_ETHER_TYPE_IPV4);
+
+        hdr->l3_hdr.version_ihl = 0x45;
+        hdr->l3_hdr.type_of_service = 0x0;
+        hdr->l3_hdr.total_length = BYTE_SWAP16(sizeof(struct ipv4_hdr) + sizeof(struct udp_hdr) + buf->pkt_nbytes);
+        hdr->l3_hdr.packet_id = 0;
+        hdr->l3_hdr.fragment_offset = rte_cpu_to_be_16(0x4000); // 0;
+        hdr->l3_hdr.time_to_live = 0x40; // 60;
+        hdr->l3_hdr.next_proto_id = IPPROTO_UDP;
+        hdr->l3_hdr.hdr_checksum = 0;
+        hdr->l3_hdr.src_addr = 0;
+        hdr->l3_hdr.dst_addr = 0;
+
+        hdr->l4_hdr.src_port = 0;
+        hdr->l4_hdr.dst_port = 0;
+        hdr->l4_hdr.dgram_len = BYTE_SWAP16(sizeof(struct udp_hdr) + buf->pkt_nbytes);
+        hdr->l4_hdr.dgram_cksum = 0;
+    }
+
+    /* Copy the whole list of packets into GPU memory buffer */
+    res_cuda = cudaMemcpy(buf->gpu_pkt_addr, cpu_pkt_addr, buf->num_packets * buf->max_pkt_sz, cudaMemcpyDefault);
+    free(cpu_pkt_addr);
+    if (res_cuda != cudaSuccess) {
+        DOCA_LOG_ERR("Function CUDA Memcpy cqe_addr failed with %s", cudaGetErrorString(res_cuda));
+        return DOCA_ERROR_DRIVER;
+    }
+
+    return DOCA_SUCCESS;
 }
 
 }

@@ -23,6 +23,7 @@ namespace lng {
 
 DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     : sem_fr_idx(0)
+    , sem_reply_idx(0)
 {
 
     doca_error_t result;
@@ -47,22 +48,28 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     rxq.reset(new struct rx_queue);
     sem_rx.reset(new struct semaphore);
     sem_fr.reset(new struct semaphore);
+    sem_reply.reset(new struct semaphore);
+    txq.reset(new struct tx_queue);
+    tx_buf_arr.reset(new struct tx_buf);
 
     create_rx_queue(rxq.get(), gpu_dev, ddev);
     create_semaphore(sem_rx.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
     create_semaphore(sem_fr.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct fr_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
+    create_semaphore(sem_reply.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct reply_info), DOCA_GPU_MEM_TYPE_CPU_GPU);
     create_udp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
 
     /* Create root control pipe to route tcp/udp/OS packets */
-    result = create_udp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe, df_port);
-    if (result != DOCA_SUCCESS) {
-        throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
-    }
+    create_udp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe, df_port);
+
+    create_tx_queue(txq.get(), gpu_dev, ddev);
+
+    create_tx_buf(tx_buf_arr.get(), gpu_dev, ddev, TX_BUF_NUM, TX_BUF_MAX_SZ);
+    prepare_udp_tx_buf(tx_buf_arr.get());
 
     std::vector<cudaStream_t> streams;
 
     init_udp_kernels(streams);
-    launch_udp_kernels(rxq.get(), sem_rx.get(), sem_fr.get(), streams);
+    launch_udp_kernels(rxq.get(), txq.get(), tx_buf_arr.get(), sem_rx.get(), sem_fr.get(), sem_reply.get(), streams);
 }
 
 DOCAStream::Impl::~Impl()
@@ -81,14 +88,26 @@ DOCAStream::Impl::~Impl()
 
 bool DOCAStream::Impl::put(uint8_t** v, size_t count)
 {
-    // auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
-    // if (nb != 1) {
-    //     throw std::runtime_error("rte_eth_tx_burst");
-    // }
-    return false;
+    size_t ret = 0;
+    struct reply_info* reply_info_global;
+    enum doca_gpu_semaphore_status status = DOCA_GPU_SEMAPHORE_STATUS_READY;
+
+    for (; ret < count; ++ret) {
+        uint32_t sem_idx = (sem_reply_idx + ret) % sem_reply->sem_num;
+        while (status != DOCA_GPU_SEMAPHORE_STATUS_FREE) {
+            doca_gpu_semaphore_get_status(sem_reply->sem_cpu, sem_idx, &status);
+        }
+        doca_gpu_semaphore_get_custom_info_addr(sem_reply->sem_cpu, sem_idx, (void**)&(reply_info_global));
+        DOCA_GPUNETIO_VOLATILE(reply_info_global->eth_payload) = DOCA_GPUNETIO_VOLATILE(v[ret]);
+        printf("put %p\n", v[ret]);
+        doca_gpu_semaphore_set_status(sem_reply->sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
+    }
+    sem_reply_idx = (sem_reply_idx + ret) % sem_reply->sem_num;
+
+    return ret;
 }
 
-size_t DOCAStream::Impl::get(uint8_t*** vp, size_t max)
+size_t DOCAStream::Impl::get(uint8_t** vp, size_t max)
 {
     size_t ret = 0;
     struct fr_info* fr_info_global;
@@ -101,14 +120,15 @@ size_t DOCAStream::Impl::get(uint8_t*** vp, size_t max)
             break;
         } else {
             doca_gpu_semaphore_get_custom_info_addr(sem_fr->sem_cpu, sem_idx, (void**)&(fr_info_global));
-            vp_internal[ret] = fr_info_global->eth_payload;
+            DOCA_GPUNETIO_VOLATILE(vp[ret]) = DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload);
+            printf("get %p\n", vp[ret]);
             doca_gpu_semaphore_set_status(sem_fr->sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
         }
     }
 
-    *vp = vp_internal;
-
     sem_fr_idx = (sem_fr_idx + ret) % sem_fr->sem_num;
+    if (ret)
+        printf("sem_fr_idx %d\n", sem_fr_idx);
 
     return ret;
 }

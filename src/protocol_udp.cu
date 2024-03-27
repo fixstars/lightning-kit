@@ -266,8 +266,8 @@ __global__ void cuda_kernel_makeframe(
 
                     ret = doca_gpu_dev_semaphore_set_status(sem_fr_recvinfo, sem_idx % sem_fr_num, DOCA_GPU_SEMAPHORE_STATUS_READY);
 
-                    // raw_to_udp(buf_addr, &hdr, &payload);
-                    // printf("%d l4_hdr\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
+                    raw_to_udp(buf_addr, &hdr, &payload);
+                    printf("%d l4_hdr bytes recv\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
                     // printf("%d l3_hdr\n", BYTE_SWAP16(hdr->l3_hdr.total_length));
                 }
                 all_frame_done = true;
@@ -278,8 +278,148 @@ __global__ void cuda_kernel_makeframe(
         packet_reached = false;
         all_frame_done = false;
         if (threadIdx.x == 0) {
-            sem_fr_recvinfo_idx = (sem_fr_recvinfo_idx + rx_pkt_num - 1) % sem_fr_num;
+            sem_fr_recvinfo_idx = (sem_fr_recvinfo_idx + rx_pkt_num) % sem_fr_num;
         }
+    }
+}
+
+template <typename T>
+__inline__ __device__ T warpMax(T localMax)
+{
+    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 16));
+    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 8));
+    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 4));
+    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 2));
+    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 1));
+
+    return localMax;
+}
+
+__inline__ __device__ void swap_eth(struct ether_hdr* eth)
+{
+    uint8_t tmp_addr[ETHER_ADDR_LEN];
+    memcpy(tmp_addr, eth->d_addr_bytes, ETHER_ADDR_LEN);
+    memcpy(eth->d_addr_bytes, eth->s_addr_bytes, ETHER_ADDR_LEN);
+    memcpy(eth->s_addr_bytes, tmp_addr, ETHER_ADDR_LEN);
+}
+
+__global__ void cuda_kernel_send_packets(
+    struct doca_gpu_eth_txq* txq,
+    struct doca_gpu_buf_arr* tx_buf_arr,
+    int sem_reply_num, struct doca_gpu_semaphore_gpu* sem_reply_recvinfo,
+    bool is_warmup)
+{
+    if (is_warmup) {
+        if (threadIdx.x == 0) {
+            printf("warmup cuda_kernel_send_packets\n");
+        }
+        return;
+    }
+
+    doca_error_t ret;
+    struct doca_gpu_buf* buf_ptr;
+    struct reply_info* reply_info_global;
+    struct eth_ip_udp_hdr* hdr;
+    uint8_t* buf_addr;
+    __shared__ uint32_t sem_reply_recvinfo_idx;
+    enum doca_gpu_semaphore_status reply_status;
+    __shared__ int32_t max_sent_id[32];
+    const uint32_t base_pkt_len = sizeof(struct eth_ip_udp_hdr);
+
+    int warp_id = threadIdx.x / warpSize;
+    int lane_id = threadIdx.x % warpSize;
+    int warp_num = blockDim.x / warpSize;
+    int th_id = threadIdx.x;
+
+    if (threadIdx.x == 0) {
+        sem_reply_recvinfo_idx = 0;
+    }
+
+    __syncthreads();
+
+    while (true) {
+        uint32_t sem_idx = (sem_reply_recvinfo_idx + threadIdx.x) % sem_reply_num;
+        ret = doca_gpu_dev_semaphore_get_status(sem_reply_recvinfo, sem_idx, &reply_status);
+        if (ret != DOCA_SUCCESS) {
+            printf("TCP semaphore error");
+            return;
+        }
+        int32_t sent_id = -1;
+        if (reply_status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
+            sent_id = threadIdx.x;
+            ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_reply_recvinfo, sem_idx, (void**)&(reply_info_global));
+            if (ret != DOCA_SUCCESS) {
+                printf("TCP semaphore get address error\n");
+                return;
+            }
+
+            DOCA_GPUNETIO_VOLATILE(buf_addr) = DOCA_GPUNETIO_VOLATILE(reply_info_global->eth_payload);
+
+            __threadfence();
+
+            // printf("%d rx_pkt_num frame \n", rx_pkt_num);
+            // printf("%d rx_buf_idx frame \n", rx_buf_idx);
+
+            ret = doca_gpu_dev_semaphore_set_status(sem_reply_recvinfo, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+            if (ret != DOCA_SUCCESS) {
+                printf("TCP semaphore error\n");
+                return;
+            }
+            __threadfence_system();
+
+            struct doca_gpu_buf* reply_buf = NULL;
+            ret = doca_gpu_dev_buf_get_buf(tx_buf_arr, threadIdx.x, &reply_buf);
+
+            uintptr_t reply_buf_addr;
+            ret = doca_gpu_dev_buf_get_addr(reply_buf, &reply_buf_addr);
+
+            hdr = (struct eth_ip_udp_hdr*)buf_addr;
+
+            memcpy((uint8_t*)reply_buf_addr, buf_addr, BYTE_SWAP16(hdr->l3_hdr.total_length) + sizeof(struct ether_hdr));
+
+            hdr = (struct eth_ip_udp_hdr*)reply_buf_addr;
+
+            swap_eth(&(hdr->l2_hdr));
+
+            auto tmp_src_addr = hdr->l3_hdr.src_addr;
+            hdr->l3_hdr.src_addr = hdr->l3_hdr.dst_addr;
+            hdr->l3_hdr.dst_addr = tmp_src_addr;
+            auto tmp_src_port = hdr->l4_hdr.src_port;
+            hdr->l4_hdr.src_port = hdr->l4_hdr.dst_port;
+            hdr->l4_hdr.dst_port = tmp_src_port;
+
+            printf("%d l4_hdr bytes send", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
+
+            ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, reply_buf, base_pkt_len + BYTE_SWAP16(hdr->l4_hdr.dgram_len) - sizeof(udp_hdr), 0);
+            if (ret != DOCA_SUCCESS) {
+                printf("Error %d doca_gpu_dev_eth_txq_send_enqueue_strong block %d thread %d\n", ret, warp_id, lane_id);
+                // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                break;
+            }
+        }
+
+        sent_id = warpMax(sent_id);
+        if (lane_id == 0) {
+            max_sent_id[warp_id] = sent_id;
+        }
+        __syncthreads();
+        if (th_id < warpSize) {
+            sent_id = th_id < warp_num ? max_sent_id[th_id] : -1;
+        }
+        if (warp_id == 0) {
+            sent_id = warpMax(sent_id);
+        }
+
+        if (threadIdx.x == 0 && sent_id >= 0) {
+            doca_gpu_dev_eth_txq_commit_strong(txq);
+            doca_gpu_dev_eth_txq_push(txq);
+        }
+
+        if (threadIdx.x == 0 && sent_id > 0) {
+            sem_reply_recvinfo_idx += sent_id;
+        }
+
+        __syncthreads();
     }
 }
 
@@ -289,16 +429,22 @@ void init_udp_kernels(std::vector<cudaStream_t>& streams)
         nullptr, 0, nullptr, true);
     cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
         nullptr, 0, nullptr, 0, nullptr, true);
+    cuda_kernel_send_packets<<<1, CUDA_THREADS>>>(
+        nullptr, nullptr, 0, nullptr, true);
 
-    streams.resize(2);
+    streams.resize(3);
 
     cudaStreamCreate(&streams[0]);
     cudaStreamCreate(&streams[1]);
+    cudaStreamCreate(&streams[2]);
 }
 
 void launch_udp_kernels(struct rx_queue* rxq,
+    struct tx_queue* txq,
+    struct tx_buf* tx_buf_arr,
     struct semaphore* sem_rx,
     struct semaphore* sem_fr,
+    struct semaphore* sem_reply,
     std::vector<cudaStream_t>& streams)
 {
     cuda_kernel_receive_udp<<<1, CUDA_THREADS, 0, streams.at(0)>>>(
@@ -310,6 +456,10 @@ void launch_udp_kernels(struct rx_queue* rxq,
         rxq->eth_rxq_gpu,
         sem_rx->sem_num, sem_rx->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
+        false);
+
+    cuda_kernel_send_packets<<<1, CUDA_THREADS, 0, streams.at(2)>>>(
+        txq->eth_txq_gpu, tx_buf_arr->buf_arr_gpu, sem_reply->sem_num, sem_reply->sem_gpu,
         false);
 }
 
@@ -346,9 +496,9 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     /* Assume MAX_QUEUES == 4 */
     DOCA_LOG_INFO("kernel_receive_udp block %d thread %d %d", udp_queues->numq, CUDA_THREADS, static_cast<int>(sizeof(struct tcp_hdr) + sizeof(struct ipv4_hdr)));
 
-    launch_udp_kernels(udp_queues->rxq, udp_queues->sem,
-        udp_queues->sem, // TODO
-        streams);
+    // launch_udp_kernels(udp_queues->rxq, udp_queues->sem,
+    //     udp_queues->sem, // TODO
+    //     streams);
 
     cudaStreamSynchronize(streams[0]);
     cudaStreamSynchronize(streams[1]);
@@ -359,5 +509,4 @@ doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     return DOCA_SUCCESS;
 }
 }
-
 }

@@ -106,6 +106,7 @@ struct tx_buf {
     uint32_t max_pkt_sz; /* Max size of each packet in the buffer */
     uint32_t pkt_nbytes; /* Effective bytes in each packet */
     uint8_t* gpu_pkt_addr; /* GPU memory address of the buffer */
+    int dmabuf_fd;
     struct doca_mmap* mmap; /* DOCA mmap around GPU memory buffer for the DOCA device */
     struct doca_buf_arr* buf_arr; /* DOCA buffer array object around GPU memory buffer */
     struct doca_gpu_buf_arr* buf_arr_gpu; /* DOCA buffer array GPU handle */
@@ -127,6 +128,13 @@ struct rx_queue {
     struct doca_gpu* gpu_dev;
 };
 
+struct tx_queue {
+    struct doca_ctx* eth_txq_ctx;
+    struct doca_eth_txq* eth_txq_cpu;
+    struct doca_gpu_eth_txq* eth_txq_gpu;
+};
+
+// to be deleted
 struct rxq_tcp_queues {
     struct doca_gpu* gpu_dev; /* GPUNetio handler associated to queues */
     struct doca_dev* ddev; /* DOCA device handler associated to queues */
@@ -173,6 +181,7 @@ struct eth_ip_udp_hdr {
     struct udp_hdr l4_hdr; /* UDP header */
 } __attribute__((__packed__));
 
+// to be deleted
 struct rxq_udp_queues {
     struct doca_gpu* gpu_dev; /* GPUNetio handler associated to queues*/
     struct doca_dev* ddev; /* DOCA device handler associated to queues */
@@ -191,12 +200,14 @@ struct rxq_udp_queues {
     semaphore sem[MAX_QUEUES];
 };
 
+// to be deleted
 struct sem_pair {
     uint16_t nums; /* Number of semaphores items */
     struct doca_gpu_semaphore* sem_cpu; /* One semaphore per queue to report stats, CPU handler*/
     struct doca_gpu_semaphore_gpu* sem_gpu; /* One semaphore per queue to report stats, GPU handler*/
 };
 
+// to be deleted
 struct stats_tcp {
     uint32_t tcp_syn; /* TCP with SYN flag */
     uint32_t tcp_fin; /* TCP with FIN flag */
@@ -215,17 +226,24 @@ struct fr_info {
     uint8_t* eth_payload;
 };
 
+struct reply_info {
+    uint8_t* eth_payload;
+};
+
+// to be deleted
 struct store_buf_info {
     uint8_t* buf;
     uint64_t size;
 };
 
+// to be deleted
 struct ready_buf_info {
     uint64_t is_ready;
 };
 
 #define FRAME_SIZE (128 * 1024 * 1024)
 
+// to be deleted
 struct Frame {
     uint8_t data[FRAME_SIZE];
 };
@@ -239,12 +257,15 @@ init_doca_tcp_flow(uint16_t port_id, uint8_t rxq_num);
 struct doca_flow_port*
 init_doca_udp_flow(uint16_t port_id, uint8_t rxq_num);
 
+// to be deleted
 doca_error_t
 create_tcp_queues(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
 
+// to be deleted
 doca_error_t
 create_udp_queues(struct rxq_udp_queues* udp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
 
+// to be deleted
 doca_error_t create_sem(struct doca_gpu* gpu_dev, struct sem_pair* sem, uint16_t sem_num);
 
 doca_error_t
@@ -256,6 +277,9 @@ doca_error_t
 create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port);
 
 doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);
+doca_error_t create_tx_queue(struct tx_queue* txq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);
+doca_error_t create_tx_buf(struct tx_buf* buf, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t num_packets, uint32_t max_pkt_sz);
+doca_error_t prepare_udp_tx_buf(struct tx_buf* buf);
 doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t sem_num, int element_size, enum doca_gpu_mem_type mem_type);
 doca_error_t create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_flow_port* port, int numq);
 
@@ -268,9 +292,12 @@ destroy_udp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     struct rxq_udp_queues* udp_queues);
 
 extern "C" {
+
+// to be deleted
 doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch, struct sem_pair* sem_frame);
 
+// to be deleted. outdated
 doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch);
 }
