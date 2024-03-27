@@ -29,7 +29,7 @@ protected:
     virtual void main() override
     {
         uint8_t** v;
-        if (size_t num = outer_stream_->get(&v, 10000)) {
+        if (size_t num = outer_stream_->get(&v, 1000)) {
             std::cout << "received " << num << " packets" << std::endl;
             inner_stream_->put(v, num);
         }
@@ -52,11 +52,11 @@ public:
 protected:
     virtual void main() override
     {
-        // uint8_t** v;
-        // if (size_t num = inner_stream_->get(&v, 1000)) {
-        //     // std::cout << "send " << v->pkt_len << " bytes" << std::endl;
-        //     outer_stream_->put(v, num);
-        // }
+        uint8_t* v[1000];
+        if (size_t num = inner_stream_->get((uint8_t***)(&v), 1000)) {
+            // std::cout << "send " << v->pkt_len << " bytes" << std::endl;
+            outer_stream_->put(v, num);
+        }
     }
 
 private:
