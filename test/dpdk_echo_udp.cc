@@ -30,9 +30,9 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v;
-        if (size_t num = outer_stream_->get(&v, 100000)) {
-            std::cout << "received " << v->pkt_len << " bytes" << std::endl;
+        rte_mbuf* v[1];
+        if (size_t num = outer_stream_->get(v, 1)) {
+            std::cout << "received " << v[0]->pkt_len << " bytes" << std::endl;
             inner_stream_->put(v, num);
         }
     }
@@ -54,9 +54,9 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v;
-        if (size_t num = inner_stream_->get(&v, 100000)) {
-            std::cout << "send " << v->pkt_len << " bytes" << std::endl;
+        rte_mbuf* v[1];
+        if (size_t num = inner_stream_->get(v, 1)) {
+            std::cout << "send " << v[0]->pkt_len << " bytes" << std::endl;
             outer_stream_->put(v, num);
         }
     }

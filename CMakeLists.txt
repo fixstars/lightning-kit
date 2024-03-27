@@ -66,6 +66,7 @@ endif()
 if(LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/doca-common-util.cc
+        src/doca-common-util-internal.cc
         src/doca-stream.cc
         src/doca-tcp-util.cc
         src/doca-udp-util.cc)
