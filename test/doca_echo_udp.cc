@@ -30,7 +30,7 @@ protected:
     {
         uint8_t* v[1000];
         if (size_t num = outer_stream_->get((uint8_t**)(v), 1000)) {
-            std::cout << "received " << num << " " << ((float*)v[0]) << " packets" << std::endl;
+            // std::cout << "received " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             inner_stream_->put(v, num);
         }
     }
@@ -54,7 +54,7 @@ protected:
     {
         uint8_t* v[1000];
         if (size_t num = inner_stream_->get((uint8_t**)(v), 1000)) {
-            std::cout << "send " << num << " " << ((float*)v[0]) << " packets" << std::endl;
+            // std::cout << "send " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             outer_stream_->put(v, num);
         }
     }

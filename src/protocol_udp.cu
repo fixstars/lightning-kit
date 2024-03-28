@@ -267,7 +267,7 @@ __global__ void cuda_kernel_makeframe(
                     ret = doca_gpu_dev_semaphore_set_status(sem_fr_recvinfo, sem_idx % sem_fr_num, DOCA_GPU_SEMAPHORE_STATUS_READY);
 
                     raw_to_udp(buf_addr, &hdr, &payload);
-                    printf("%d l4_hdr bytes recv\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
+                    // printf("%d l4_hdr bytes recv\n", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
                     // printf("%d l3_hdr\n", BYTE_SWAP16(hdr->l3_hdr.total_length));
                 }
                 all_frame_done = true;
@@ -388,7 +388,7 @@ __global__ void cuda_kernel_send_packets(
             hdr->l4_hdr.src_port = hdr->l4_hdr.dst_port;
             hdr->l4_hdr.dst_port = tmp_src_port;
 
-            printf("%d l4_hdr bytes send", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
+            // printf("%d l4_hdr bytes send", BYTE_SWAP16(hdr->l4_hdr.dgram_len));
 
             ret = doca_gpu_dev_eth_txq_send_enqueue_strong(txq, reply_buf, base_pkt_len + BYTE_SWAP16(hdr->l4_hdr.dgram_len) - sizeof(udp_hdr), 0);
             if (ret != DOCA_SUCCESS) {
