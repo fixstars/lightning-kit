@@ -3,9 +3,9 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <memory>
 
 namespace lng {
 
@@ -40,12 +40,17 @@ private:
         std::string id;
         State state;
 
-        Impl(Actor *obj, const std::string& id)
-            : th(entry_point, obj), mutex(), cvar(), id(id), state(State::Init)
+        Impl(Actor* obj, const std::string& id)
+            : th(entry_point, obj)
+            , mutex()
+            , cvar()
+            , id(id)
+            , state(State::Init)
         {
         }
 
-        ~Impl() {
+        ~Impl()
+        {
             if (th.joinable()) {
                 th.join();
             }
@@ -64,8 +69,7 @@ protected:
     virtual void main() = 0;
 
 private:
-
-    static void entry_point(Actor *obj);
+    static void entry_point(Actor* obj);
     void transit(State from, State to);
 
     std::shared_ptr<Impl> impl_;

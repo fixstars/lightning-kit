@@ -299,6 +299,7 @@ destroy_tcp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     return DOCA_SUCCESS;
 }
 
+// to be deleted
 doca_error_t prepare_tx_buf(struct tx_buf* buf)
 {
     uint8_t* cpu_pkt_addr;
@@ -357,89 +358,6 @@ doca_error_t prepare_tx_buf(struct tx_buf* buf)
     if (res_cuda != cudaSuccess) {
         DOCA_LOG_ERR("Function CUDA Memcpy cqe_addr failed with %s", cudaGetErrorString(res_cuda));
         return DOCA_ERROR_DRIVER;
-    }
-
-    return DOCA_SUCCESS;
-}
-
-doca_error_t create_tx_buf(struct tx_buf* buf, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t num_packets, uint32_t max_pkt_sz)
-{
-    doca_error_t status;
-
-    if (buf == NULL || gpu_dev == NULL || ddev == NULL || num_packets == 0 || max_pkt_sz == 0) {
-        DOCA_LOG_ERR("Invalid input arguments");
-        return DOCA_ERROR_INVALID_VALUE;
-    }
-
-    buf->gpu_dev = gpu_dev;
-    buf->ddev = ddev;
-    buf->num_packets = num_packets;
-    buf->max_pkt_sz = max_pkt_sz;
-
-    status = doca_mmap_create(&(buf->mmap));
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to create doca_buf: failed to create mmap");
-        return status;
-    }
-
-    status = doca_mmap_add_dev(buf->mmap, buf->ddev);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to add dev to buf: doca mmap internal error");
-        return status;
-    }
-
-    status = doca_gpu_mem_alloc(buf->gpu_dev, buf->num_packets * buf->max_pkt_sz, 4096, DOCA_GPU_MEM_TYPE_GPU, (void**)(&buf->gpu_pkt_addr), NULL);
-    if ((status != DOCA_SUCCESS) || (buf->gpu_pkt_addr == NULL)) {
-        DOCA_LOG_ERR("Unable to alloc txbuf: failed to allocate gpu memory");
-        return status;
-    }
-
-    status = doca_mmap_set_memrange(buf->mmap, buf->gpu_pkt_addr, (buf->num_packets * buf->max_pkt_sz));
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca mmap internal error");
-        return status;
-    }
-
-    status = doca_mmap_set_permissions(buf->mmap, DOCA_ACCESS_FLAG_LOCAL_READ_WRITE | DOCA_ACCESS_FLAG_PCI_RELAXED_ORDERING);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca mmap internal error");
-        return status;
-    }
-
-    status = doca_mmap_start(buf->mmap);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca mmap internal error");
-        return status;
-    }
-
-    status = doca_buf_arr_create(buf->mmap, &buf->buf_arr);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca buf_arr internal error");
-        return status;
-    }
-
-    status = doca_buf_arr_set_target_gpu(buf->buf_arr, buf->gpu_dev);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca buf_arr internal error");
-        return status;
-    }
-
-    status = doca_buf_arr_set_params(buf->buf_arr, buf->max_pkt_sz, buf->num_packets, 0);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca buf_arr internal error");
-        return status;
-    }
-
-    status = doca_buf_arr_start(buf->buf_arr);
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to start buf: doca buf_arr internal error");
-        return status;
-    }
-
-    status = doca_buf_arr_get_gpu_handle(buf->buf_arr, &(buf->buf_arr_gpu));
-    if (status != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Unable to get buff_arr GPU handle: %s", doca_error_get_descr(status));
-        return status;
     }
 
     return DOCA_SUCCESS;
