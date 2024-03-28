@@ -180,17 +180,18 @@ DPDKStream::Impl::~Impl()
     rte_eal_cleanup();
 }
 
-void DPDKStream::put(rte_mbuf* v)
+bool DPDKStream::put(rte_mbuf** v, size_t count)
 {
-    auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
-    if (nb != 1) {
+    auto nb = rte_eth_tx_burst(impl_->port_id, 0, v, count);
+    if (nb != count) {
         throw std::runtime_error("rte_eth_tx_burst");
     }
+    return true;
 }
 
-bool DPDKStream::get(rte_mbuf** vp)
+size_t DPDKStream::get(rte_mbuf** vp, size_t max)
 {
-    if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
+    if (!rte_eth_rx_burst(impl_->port_id, 0, vp, max)) {
         return false;
     }
     return true;

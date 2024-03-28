@@ -14,8 +14,8 @@ namespace lng {
 template <typename T>
 class Stream {
 public:
-    virtual void put(T v) = 0;
-    virtual bool get(T* vp) = 0;
+    virtual bool put(T* v, size_t count) = 0;
+    virtual size_t get(T* vp, size_t max) = 0;
 };
 
 template <typename T>
@@ -31,14 +31,14 @@ public:
     {
     }
 
-    virtual void put(T v)
+    virtual bool put(T* v, size_t count)
     {
-        impl_->queue.enqueue(v);
+        return impl_->queue.enqueue_bulk(v, count);
     }
 
-    virtual bool get(T* vp)
+    virtual size_t get(T* vp, size_t max)
     {
-        return impl_->queue.try_dequeue(*vp);
+        return impl_->queue.try_dequeue_bulk(vp, max);
     }
 
 private:
@@ -63,9 +63,9 @@ public:
     {
     }
 
-    virtual void put(rte_mbuf* v);
+    virtual bool put(rte_mbuf** v, size_t count);
 
-    virtual bool get(rte_mbuf** vp);
+    virtual size_t get(rte_mbuf** vp, size_t max);
 
 private:
     std::shared_ptr<Impl> impl_;
