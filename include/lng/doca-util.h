@@ -262,10 +262,6 @@ doca_error_t
 create_tcp_queues(struct rxq_tcp_queues* tcp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
 
 // to be deleted
-doca_error_t
-create_udp_queues(struct rxq_udp_queues* udp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num);
-
-// to be deleted
 doca_error_t create_sem(struct doca_gpu* gpu_dev, struct sem_pair* sem, uint16_t sem_num);
 
 doca_error_t
@@ -296,10 +292,6 @@ extern "C" {
 // to be deleted
 doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
     uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch, struct sem_pair* sem_frame);
-
-// to be deleted. outdated
-doca_error_t kernel_receive_udp(struct rxq_udp_queues* udp_queues,
-    uint8_t* cpu_tar_buf, uint64_t size, uint64_t pitch);
 }
 
 } // lng

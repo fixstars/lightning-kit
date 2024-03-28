@@ -232,40 +232,6 @@ destroy_udp_flow_queue(uint16_t port_id, struct doca_flow_port* port_df,
     return DOCA_SUCCESS;
 }
 
-doca_error_t
-create_udp_queues(struct rxq_udp_queues* udp_queues, struct doca_flow_port* df_port, struct doca_gpu* gpu_dev, struct doca_dev* ddev, uint32_t queue_num, uint32_t sem_num)
-{
-    doca_error_t result;
-
-    if (udp_queues == NULL || df_port == NULL || gpu_dev == NULL || ddev == NULL || queue_num == 0 || sem_num == 0) {
-        DOCA_LOG_ERR("Can't create UDP queues, invalid input");
-        return DOCA_ERROR_INVALID_VALUE;
-    }
-
-    udp_queues->gpu_dev = gpu_dev;
-    udp_queues->ddev = ddev;
-    udp_queues->port = df_port;
-    udp_queues->numq = queue_num;
-    udp_queues->nums = sem_num;
-
-    for (int idx = 0; idx < queue_num; idx++) {
-        DOCA_LOG_INFO("Creating UDP Eth Rxq %d", idx);
-
-        create_rx_queue(&(udp_queues->rxq[idx]), gpu_dev, ddev);
-
-        create_semaphore(&(udp_queues->sem[idx]), gpu_dev, sem_num, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
-    }
-
-    /* Create UDP based flow pipe */
-    result = create_udp_pipe(&(udp_queues->rxq_pipe), udp_queues->rxq, df_port, udp_queues->numq);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Function build_rxq_pipe returned %s", doca_error_get_descr(result));
-        return DOCA_ERROR_BAD_STATE;
-    }
-
-    return DOCA_SUCCESS;
-}
-
 doca_error_t create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port)
 {
     uint32_t priority_high = 1;
