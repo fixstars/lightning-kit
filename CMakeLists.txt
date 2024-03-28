@@ -66,6 +66,8 @@ endif()
 if(LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/doca-common-util.cc
+        src/doca-common-util-internal.cc
+        src/doca-stream.cc
         src/doca-tcp-util.cc
         src/doca-udp-util.cc)
 endif()
@@ -116,11 +118,14 @@ if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     target_link_libraries(test_dpdk_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
+if(LNG_WITH_DOCA)
+    add_executable(test_doca_echo_udp test/doca_echo_udp.cc)
+    target_link_libraries(test_doca_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+endif()
+
 if(LNG_WITH_NVIDIA)
     add_executable(test_tcp test/test_tcp.cc)
     target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
-    add_executable(test_udp test/test_udp.cc)
-    target_link_libraries(test_udp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
 endif()
 
 #
