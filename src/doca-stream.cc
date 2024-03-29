@@ -21,7 +21,7 @@
 
 namespace lng {
 
-DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
+DOCAUDPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     : sem_fr_idx(0)
     , sem_reply_idx(0)
 {
@@ -72,7 +72,7 @@ DOCAStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     launch_udp_kernels(rxq.get(), txq.get(), tx_buf_arr.get(), sem_rx.get(), sem_fr.get(), sem_reply.get(), streams);
 }
 
-DOCAStream::Impl::~Impl()
+DOCAUDPStream::Impl::~Impl()
 {
     doca_error_t result;
     // result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
@@ -86,7 +86,7 @@ DOCAStream::Impl::~Impl()
     }
 }
 
-bool DOCAStream::Impl::put(uint8_t** v, size_t count)
+bool DOCAUDPStream::Impl::put(uint8_t** v, size_t count)
 {
     size_t ret = 0;
     struct reply_info* reply_info_global;
@@ -107,7 +107,7 @@ bool DOCAStream::Impl::put(uint8_t** v, size_t count)
     return ret;
 }
 
-size_t DOCAStream::Impl::get(uint8_t** vp, size_t max)
+size_t DOCAUDPStream::Impl::get(uint8_t** vp, size_t max)
 {
     size_t ret = 0;
     struct fr_info* fr_info_global;

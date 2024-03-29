@@ -85,7 +85,7 @@ private:
 
 #if defined(LNG_WITH_DOCA)
 
-class DOCAStream : public Stream<uint8_t*> {
+class DOCAUDPStream : public Stream<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -111,7 +111,7 @@ class DOCAStream : public Stream<uint8_t*> {
     };
 
 public:
-    DOCAStream(std::string nic_addr, std::string gpu_addr)
+    DOCAUDPStream(std::string nic_addr, std::string gpu_addr)
         : impl_(new Impl(nic_addr, gpu_addr))
     {
     }

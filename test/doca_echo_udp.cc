@@ -74,7 +74,7 @@ int main()
 
         System sys;
 
-        DOCAStream outer_stream("a1:00.1", "81:00.0");
+        DOCAUDPStream outer_stream("a1:00.1", "81:00.0");
         MemoryStream<uint8_t*> inner_stream;
 
         auto receiver(sys.create_actor<Receiver>("/receiver",
