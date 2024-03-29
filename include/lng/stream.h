@@ -130,6 +130,58 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
+class DOCATCPStream : public Stream<uint8_t*> {
+
+    struct Impl {
+        struct doca_gpu* gpu_dev;
+        struct doca_dev* ddev;
+        struct doca_flow_port* df_port;
+        std::unique_ptr<struct rx_queue> rxq;
+        std::unique_ptr<struct tx_queue> txq;
+        std::unique_ptr<struct semaphore> sem_rx;
+        std::unique_ptr<struct semaphore> sem_fr;
+        uint32_t sem_fr_idx;
+        uint16_t port_id;
+        struct doca_flow_pipe* rxq_pipe;
+        struct doca_flow_pipe* root_pipe;
+        struct doca_flow_pipe_entry* root_udp_entry;
+        std::unique_ptr<struct tx_buf> tx_buf_arr;
+
+        static constexpr uint32_t FRAME_NUM = 16;
+        static constexpr size_t FRAME_SIZE = 64 * 1024 * 1024;
+        static constexpr size_t TMP_FRAME_SIZE = 9000 * 256; // one eth payload is under 9000, one receive_block is under 256 usually
+
+        uint32_t* first_ackn;
+        int* is_fin;
+        uint8_t* tar_bufs;
+        uint8_t* tmp_buf;
+
+        Impl(std::string nic_addr, std::string gpu_addr);
+        ~Impl();
+        size_t get(uint8_t** vp, size_t max);
+        bool put(uint8_t** v, size_t count);
+    };
+
+public:
+    DOCATCPStream(std::string nic_addr, std::string gpu_addr)
+        : impl_(new Impl(nic_addr, gpu_addr))
+    {
+    }
+
+    virtual bool put(uint8_t** v, size_t count)
+    {
+        return impl_->put(v, count);
+    }
+
+    virtual size_t get(uint8_t** vp, size_t max)
+    {
+        return impl_->get(vp, max);
+    }
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
 #endif
 
 } // lng

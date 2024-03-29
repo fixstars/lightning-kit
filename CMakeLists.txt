@@ -121,12 +121,14 @@ endif()
 if(LNG_WITH_DOCA)
     add_executable(test_doca_echo_udp test/doca_echo_udp.cc)
     target_link_libraries(test_doca_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+    add_executable(test_doca_build_frame_tcp test/doca_build_frame_tcp.cc)
+    target_link_libraries(test_doca_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
-if(LNG_WITH_NVIDIA)
-    add_executable(test_tcp test/test_tcp.cc)
-    target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
-endif()
+# if(LNG_WITH_NVIDIA)
+#     add_executable(test_tcp test/test_tcp.cc)
+#     target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+# endif()
 
 #
 # Install
