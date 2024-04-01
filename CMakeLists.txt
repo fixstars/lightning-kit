@@ -109,9 +109,14 @@ target_link_libraries(lng-core
 # Test
 #
 enable_testing()
+
 add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
 add_test(test_basic test_basic)
+
+add_executable(test_async test/async.cc)
+target_link_libraries(test_async lng-core)
+add_test(test_async test_async)
 
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
