@@ -108,15 +108,18 @@ target_link_libraries(lng-core
 #
 # Test
 #
+enable_testing()
 add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
+add_test(test_basic test_basic)
 
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
     target_link_libraries(test_dpdk_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+    add_test(test_dpdk_echo_udp test_basic)
 endif()
 
-if(LNG_WITH_NVIDIA)
+if(LNG_WITH_DOCA)
     add_executable(test_tcp test/test_tcp.cc)
     target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
     add_executable(test_udp test/test_udp.cc)
