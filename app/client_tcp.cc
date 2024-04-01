@@ -602,6 +602,16 @@ int sending_tcp_data(void* arg1)
             if (!g_running) {
                 break;
             }
+
+            if (bandwidth_in_gbps) {
+                sent_in_bytes += payload_size;
+
+                auto stop_time = (8 * sent_in_bytes / (bandwidth_in_gbps * 1024.0 * 1024.0 * 1024.0)) - (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ts1).count() / 1000.0);
+
+                if (stop_time > 0) {
+                    usleep(static_cast<int>(stop_time * 1000 * 1000));
+                }
+            }
         }
 
         if ((n++ % 100) == 0) {
