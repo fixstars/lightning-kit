@@ -5,6 +5,7 @@
 #include <doca_gpunetio_dev_eth_txq.cuh>
 #include <doca_gpunetio_dev_sem.cuh>
 
+#include "cuda_reduce.h"
 #include "lng/doca-util.h"
 
 #include <vector>
@@ -281,18 +282,6 @@ __global__ void cuda_kernel_makeframe(
             sem_fr_recvinfo_idx = (sem_fr_recvinfo_idx + rx_pkt_num) % sem_fr_num;
         }
     }
-}
-
-template <typename T>
-__inline__ __device__ T warpMax(T localMax)
-{
-    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 16));
-    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 8));
-    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 4));
-    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 2));
-    localMax = max(localMax, __shfl_xor_sync(0xffffffff, localMax, 1));
-
-    return localMax;
 }
 
 __inline__ __device__ void swap_eth(struct ether_hdr* eth)

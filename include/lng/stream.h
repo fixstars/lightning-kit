@@ -147,9 +147,10 @@ class DOCATCPStream : public Stream<uint8_t*> {
         struct doca_flow_pipe_entry* root_udp_entry;
         std::unique_ptr<struct tx_buf> tx_buf_arr;
 
+#define FB_BLOCK_NUM 16
         static constexpr uint32_t FRAME_NUM = 16;
         static constexpr size_t FRAME_SIZE = 64 * 1024 * 1024;
-        static constexpr size_t TMP_FRAME_SIZE = 9000 * 256; // one eth payload is under 9000, one receive_block is under 256 usually
+        static constexpr size_t TMP_FRAME_SIZE = 9000 * 256 * FB_BLOCK_NUM; // one eth payload is under 9000, one receive_block is under 256 usually
 
         uint32_t* first_ackn;
         int* is_fin;
