@@ -192,7 +192,7 @@ __global__ void cuda_kernel_receive_tcp(
                 }
                 doca_gpu_dev_eth_txq_commit_strong(txq);
                 doca_gpu_dev_eth_txq_push(txq);
-                printf("doca_gpu_dev_eth_txq_push\n");
+                // printf("doca_gpu_dev_eth_txq_push\n");
                 // auto tx_ed_clock = clock64();
             }
 
@@ -225,7 +225,9 @@ __global__ void cuda_kernel_receive_tcp(
 }
 
 __global__ void cuda_kernel_makeframe(
-    uint8_t* tar_buf, uint64_t tar_buf_total_size, uint64_t pitch, uint32_t* first_ackn,
+    uint8_t* tar_buf, uint64_t tar_buf_total_size, uint64_t pitch,
+    uint8_t* tmp_buf,
+    uint32_t* first_ackn,
     struct doca_gpu_eth_rxq* rxq,
     int sem_num,
     struct doca_gpu_semaphore_gpu* sem_recvinfo,
@@ -239,7 +241,6 @@ __global__ void cuda_kernel_makeframe(
         return;
     }
 
-    printf("cuda_kernel_makeframe run\n");
     __shared__ uint32_t rx_pkt_num;
     __shared__ uint64_t rx_buf_idx;
 
@@ -252,6 +253,8 @@ __global__ void cuda_kernel_makeframe(
     // __shared__ uint64_t tar_buf_total_size;
 
     __shared__ uint32_t cur_ackn;
+
+    __shared__ uint64_t tmp_buf_head;
 
     doca_error_t ret;
     struct doca_gpu_buf* buf_ptr;
@@ -273,6 +276,7 @@ __global__ void cuda_kernel_makeframe(
         // tar_buf = nullptr;
         // tar_buf_total_size = 0;
         quit = false;
+        tmp_buf_head = 0;
     }
 
     if (blockIdx.x != 0) {
@@ -340,6 +344,7 @@ __global__ void cuda_kernel_makeframe(
             if (status_frame == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
                 printf("%d set buf\n", sem_frame_idx);
                 cur_tar_buf = tar_buf + sem_frame_idx * pitch;
+                // memcpy(cur_tar_buf, tmp_buf, frame_head);
             }
         }
 
@@ -367,10 +372,17 @@ __global__ void cuda_kernel_makeframe(
                 uint32_t offset = sent_seq - prev_ackn;
                 uint64_t cur_head = frame_head + offset;
 
-                if (cur_head < tar_buf_total_size) {
-                    uint32_t write_byte = min(cur_head + total_payload_size, tar_buf_total_size) - cur_head;
+                if (cur_head + total_payload_size <= tar_buf_total_size) {
+                    uint32_t write_byte = total_payload_size;
                     uint8_t* data_head = cur_tar_buf + cur_head;
-                    memcpy(data_head, payload, write_byte);
+                    // memcpy(data_head, payload, write_byte);
+                } else if (cur_head < tar_buf_total_size) {
+                    uint32_t write_byte = total_payload_size - cur_head;
+                    uint8_t* data_head = cur_tar_buf + cur_head;
+                    // memcpy(data_head, payload, write_byte);
+                    // memcpy(tmp_buf, payload + write_byte, total_payload_size - write_byte);
+                } else {
+                    // memcpy(tmp_buf + cur_head - tar_buf_total_size, payload, total_payload_size);
                 }
             }
         }
@@ -378,6 +390,9 @@ __global__ void cuda_kernel_makeframe(
         if (threadIdx.x == 0 && rx_pkt_num > 0) {
             uint64_t bytes = (cur_ackn - prev_ackn);
             frame_head += bytes;
+            if (frame_head > 2 * tar_buf_total_size) {
+                printf("error\n");
+            }
             if (frame_head > tar_buf_total_size) {
                 ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
                 __threadfence_system();
@@ -417,7 +432,7 @@ __global__ void frame_notice(
             if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
                 printf("%d kitayo\n", frame_counter);
                 ret = doca_gpu_dev_semaphore_set_status(sem_frame, frame_counter, DOCA_GPU_SEMAPHORE_STATUS_FREE);
-                fin = (frame_counter == 4);
+                // fin = (frame_counter == 4);
                 frame_counter = (frame_counter + 1) % frame_num;
             }
         }
@@ -596,14 +611,16 @@ doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
         tcp_queues->eth_txq_gpu[0],
         tcp_queues->tx_buf_arr.buf_arr_gpu, tcp_queues->tx_buf_arr.pkt_nbytes);
 
-    cuda_kernel_receive_tcp<<<2, CUDA_THREADS>>>(
+    cuda_kernel_receive_tcp<<<1, CUDA_THREADS>>>(
         tcp_queues->eth_rxq_gpu[0],
         tcp_queues->eth_txq_gpu[0],
         tcp_queues->nums,
         tcp_queues->tx_buf_arr.buf_arr_gpu, tcp_queues->tx_buf_arr.pkt_nbytes,
         tcp_queues->sem_gpu[0], is_fin, true);
     cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
-        tar_buf, size, pitch, first_ackn,
+        tar_buf, size, pitch,
+        nullptr,
+        first_ackn,
         tcp_queues->eth_rxq_gpu[0],
         tcp_queues->nums,
         tcp_queues->sem_gpu[0], is_fin,
@@ -627,7 +644,7 @@ doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
 
     /* Assume MAX_QUEUES == 4 */
     DOCA_LOG_INFO("kernel_receive_tcp block %d thread %d %d", tcp_queues->numq, CUDA_THREADS, static_cast<int>(sizeof(struct tcp_hdr) + sizeof(struct ipv4_hdr)));
-    cuda_kernel_receive_tcp<<<2, CUDA_THREADS, 0, streams[0]>>>(
+    cuda_kernel_receive_tcp<<<1, 32, 0, streams[0]>>>(
         tcp_queues->eth_rxq_gpu[0],
         tcp_queues->eth_txq_gpu[0],
         tcp_queues->nums,
@@ -640,7 +657,9 @@ doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
     }
 
     cuda_kernel_makeframe<<<1, CUDA_THREADS, 0, streams[1]>>>(
-        tar_buf, size, pitch, first_ackn,
+        tar_buf, size, pitch,
+        tmp_buf,
+        first_ackn,
         tcp_queues->eth_rxq_gpu[0],
         tcp_queues->nums,
         tcp_queues->sem_gpu[0], is_fin,
@@ -651,7 +670,7 @@ doca_error_t kernel_receive_tcp(struct rxq_tcp_queues* tcp_queues,
         return DOCA_ERROR_BAD_STATE;
     }
 
-    frame_notice<<<1, CUDA_THREADS, 0, streams[2]>>>(sem_frame->sem_gpu, sem_frame->nums, false);
+    frame_notice<<<1, 32, 0, streams[2]>>>(sem_frame->sem_gpu, sem_frame->nums, false);
     result = cudaGetLastError();
     if (cudaSuccess != result) {
         DOCA_LOG_ERR("[%s:%d] cuda failed with %s \n", __FILE__, __LINE__, cudaGetErrorString(result));

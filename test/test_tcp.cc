@@ -18,13 +18,13 @@ int main()
         doca_error_t result;
         struct doca_dev* ddev = nullptr;
         uint16_t dpdk_dev_port_id;
-        result = init_doca_device("a1:00.0", &ddev, &dpdk_dev_port_id);
+        result = init_doca_device("17:00.1", &ddev, &dpdk_dev_port_id);
         if (result != DOCA_SUCCESS) {
             throw std::runtime_error("Function init_doca_device returned " + std::string(doca_error_get_descr(result)));
         }
 
         struct doca_gpu* gpu_dev = nullptr;
-        result = doca_gpu_create("81:00.0", &gpu_dev);
+        result = doca_gpu_create("2a:00.0", &gpu_dev);
         if (result != DOCA_SUCCESS) {
             throw std::runtime_error("Function doca_gpu_create returned " + std::string(doca_error_get_descr(result)));
         }
