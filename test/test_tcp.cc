@@ -43,7 +43,7 @@ int main()
         }
 
         struct sem_pair sem_frame;
-#define FRAME_NUM 16
+#define FRAME_NUM 2
         result = create_sem(gpu_dev, &sem_frame, FRAME_NUM);
         // TODO: Handle semaphore
         // if (result != DOCA_SUCCESS) {
@@ -56,8 +56,9 @@ int main()
             throw std::runtime_error("Function create_root_pipe returned " + std::string(doca_error_get_descr(result)));
         }
 
-#define RECV_BYTES MINIMUM_TARBUF_SIZE
-        std::vector<uint8_t> tar_buf(RECV_BYTES * FRAME_NUM, 0);
+#define RECV_BYTES (1024 * 1024 * 1024)
+        std::vector<uint8_t> tar_buf;
+        // std::vector<uint8_t> tar_buf(RECV_BYTES * FRAME_NUM, 0);
 
         kernel_receive_tcp(&tcp_queues, tar_buf.data(), RECV_BYTES, RECV_BYTES, &sem_frame);
 
