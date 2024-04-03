@@ -16,14 +16,14 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     constexpr uint32_t mtu = 9000;
 
     // Initializion the environment abstraction layer
-    std::vector<std::string> arguments = {"."};
-    std::vector<char *>args;
+    std::vector<std::string> arguments = { "." };
+    std::vector<char*> args;
     for (auto& a : arguments) {
         args.push_back(&a[0]);
     }
     args.push_back(nullptr);
 
-    int ret = rte_eal_init(args.size()-1, args.data());
+    int ret = rte_eal_init(args.size() - 1, args.data());
     if (ret < 0) {
         throw std::runtime_error("Cannot initialize DPDK");
     }
@@ -36,7 +36,7 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     mbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", n, cache_size, 0, data_room_size, rte_socket_id());
     if (mbuf_pool == nullptr) {
         throw std::runtime_error(fmt::format("Cannot create mbuf pool, n={}, cache_size={}, priv_size=0, data_room_size={}",
-                                     n, cache_size, data_room_size));
+            n, cache_size, data_room_size));
     }
 
     // Initializing all ports
@@ -156,7 +156,8 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     log::info("Link status is {}", link.link_status ? "up" : "down");
 }
 
-DPDKStream::Impl::~Impl() {
+DPDKStream::Impl::~Impl()
+{
     auto ret = rte_eth_dev_stop(port_id);
     if (ret < 0) {
         log::error("Failed to stop device: {}", strerror(-ret));
@@ -179,19 +180,20 @@ DPDKStream::Impl::~Impl() {
     rte_eal_cleanup();
 }
 
-void DPDKStream::put(rte_mbuf *v) {
+void DPDKStream::put(rte_mbuf* v)
+{
     auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
     if (nb != 1) {
         throw std::runtime_error("rte_eth_tx_burst");
     }
 }
 
-bool DPDKStream::get(rte_mbuf **vp) {
-        if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
-            return false;
-        }
-        return true;
+bool DPDKStream::get(rte_mbuf** vp)
+{
+    if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
+        return false;
     }
-
+    return true;
+}
 
 } // lng
