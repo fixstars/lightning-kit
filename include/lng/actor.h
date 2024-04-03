@@ -40,12 +40,15 @@ private:
         std::string id;
         State state;
 
-        Impl(Actor* obj, const std::string& id)
+        int cpu_id;
+
+        Impl(Actor* obj, const std::string& id, int cpu)
             : th(entry_point, obj)
             , mutex()
             , cvar()
             , id(id)
             , state(State::Init)
+            , cpu_id(cpu)
         {
         }
 
@@ -58,7 +61,7 @@ private:
     };
 
 public:
-    Actor(const std::string& id);
+    Actor(const std::string& id, int cpu_id);
 
     void start();
     void stop();

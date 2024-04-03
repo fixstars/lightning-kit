@@ -11,8 +11,8 @@ using namespace lng;
 template <typename T>
 class Producer : public Actor {
 public:
-    Producer(const std::string& id, Stream<T>* s)
-        : Actor(id)
+    Producer(const std::string& id, int cpu_id, Stream<T>* s)
+        : Actor(id, cpu_id)
         , stream_(s)
         , v_(0)
     {
@@ -32,8 +32,8 @@ private:
 template <typename T>
 class Consumer : public Actor {
 public:
-    Consumer(const std::string& id, Stream<T>* s)
-        : Actor(id)
+    Consumer(const std::string& id, int cpu_id, Stream<T>* s)
+        : Actor(id, cpu_id)
         , stream_(s)
     {
     }
@@ -58,8 +58,8 @@ int main()
 
         MemoryStream<int> stream;
 
-        auto consumer(sys.create_actor<Consumer<int>>("/consumer", reinterpret_cast<Stream<int>*>(&stream)));
-        auto producer(sys.create_actor<Producer<int>>("/producer", reinterpret_cast<Stream<int>*>(&stream)));
+        auto consumer(sys.create_actor<Consumer<int>>("/consumer", 4, reinterpret_cast<Stream<int>*>(&stream)));
+        auto producer(sys.create_actor<Producer<int>>("/producer", 5, reinterpret_cast<Stream<int>*>(&stream)));
 
         sys.start();
 

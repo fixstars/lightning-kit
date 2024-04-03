@@ -15,9 +15,9 @@ public:
 
     template <typename T, typename... Args,
         typename std::enable_if<std::is_base_of<Actor, T>::value>::type* = nullptr>
-    T create_actor(const std::string id, Args... args)
+    T create_actor(const std::string id, int cpu_id, Args... args)
     {
-        auto actor(std::make_shared<T>(id, args...));
+        auto actor(std::make_shared<T>(id, cpu_id, args...));
         actors_[id] = actor;
         return *actor;
     }

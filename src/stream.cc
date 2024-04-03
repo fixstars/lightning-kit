@@ -154,6 +154,24 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
+
+    wait_for_3wayhandshake();
+}
+
+void DPDKStream::Impl::wait_for_3wayhandshake()
+{
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
+            continue;
+        send_synack(v);
+        rte_pktmbuf_free(v);
+        break;
+    }
 }
 
 DPDKStream::Impl::~Impl()
@@ -194,6 +212,49 @@ bool DPDKStream::get(rte_mbuf** vp)
         return false;
     }
     return true;
+}
+
+bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, size_t length, uint8_t tcp_flags)
+{
+    auto ack_mbuf = rte_pktmbuf_copy(recv_mbuf, mbuf_pool, 0, sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr));
+
+    auto* eth = rte_pktmbuf_mtod_offset(ack_mbuf, rte_ether_hdr*, 0);
+
+    rte_ether_addr tmp_eth;
+    rte_ether_addr_copy(&eth->dst_addr, &tmp_eth);
+    rte_ether_addr_copy(&eth->src_addr, &eth->dst_addr);
+    rte_ether_addr_copy(&tmp_eth, &eth->src_addr);
+
+    auto* ipv4 = rte_pktmbuf_mtod_offset(ack_mbuf, rte_ipv4_hdr*, sizeof(rte_ether_hdr));
+
+    auto tmp_ipv4 = ipv4->src_addr;
+    ipv4->src_addr = ipv4->dst_addr;
+    ipv4->dst_addr = tmp_ipv4;
+
+    auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+
+    auto ackn = rte_be_to_cpu_32(tcp->sent_seq) + length + ((tcp->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+
+    auto tmp_port = tcp->src_port;
+    tcp->src_port = tcp->dst_port;
+    tcp->dst_port = tmp_port;
+    tcp->sent_seq = tcp->recv_ack;
+    tcp->recv_ack = rte_cpu_to_be_32(ackn);
+    tcp->tcp_flags = tcp_flags;
+
+    auto num = rte_eth_tx_burst(port_id, 0, &ack_mbuf, 1);
+
+    return num == 1;
+}
+
+bool DPDKStream::Impl::send_synack(rte_mbuf* recv_mbuf)
+{
+    return send_flag_packet(recv_mbuf, 1, RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG);
+}
+
+bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, size_t length)
+{
+    return send_flag_packet(recv_mbuf, length, RTE_TCP_ACK_FLAG);
 }
 
 } // lng

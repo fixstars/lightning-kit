@@ -20,8 +20,8 @@ namespace {
     }
 } // anonymous
 
-Actor::Actor(const std::string& id)
-    : impl_(new Impl(this, id))
+Actor::Actor(const std::string& id, int cpu_id)
+    : impl_(new Impl(this, id, cpu_id))
 {
     log::debug("{} is initialized", impl_->id);
 }
@@ -48,8 +48,17 @@ void Actor::wait_until(State to)
     impl_->cvar.wait(lock, [&] { return impl_->state == to; });
 }
 
+static inline void set_affinity(int cpu_id)
+{
+    cpu_set_t my_set;
+    CPU_ZERO(&my_set);
+    CPU_SET(cpu_id, &my_set);
+    sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
+}
+
 void Actor::entry_point(Actor* obj)
 {
+    set_affinity(obj->impl_->cpu_id);
     while (true) {
         try {
 
