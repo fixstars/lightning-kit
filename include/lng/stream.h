@@ -111,6 +111,7 @@ struct Payloads {
     rte_mbuf* buf = nullptr;
     uint8_t no_of_payload = 0;
     Segment segments[max_payloads];
+    size_t dropped_bytes = 0;
     void Clear();
     size_t ExtractPayloads(rte_mbuf* mbuf);
 };

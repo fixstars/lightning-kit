@@ -76,6 +76,62 @@ void Receiver::main()
     }
 }
 
+#ifdef __AVX512F__
+
+#pragma message("AVX512 selected")
+
+void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
+{
+    const uint8_t align = 64;
+    uintptr_t dst_aligned = (((uintptr_t)(dst) + align - 1) / align) * align;
+    if ((uintptr_t)dst != dst_aligned) {
+        size_t s = dst_aligned - (uintptr_t)dst;
+        memcpy((char*)dst, (char*)src, s);
+        size -= s;
+        src += s;
+    }
+    const uint8_t avx_len = 64;
+    uintptr_t size_aligned = (size / avx_len) * avx_len;
+    uintptr_t dst_p = dst_aligned;
+    for (; dst_p < dst_aligned + size_aligned; dst_p += avx_len, src += avx_len) {
+        _mm512_stream_si512((__m512i*)dst_p, _mm512_loadu_si512((__m512i*)src));
+    }
+    if (size_aligned != size) {
+        memcpy((char*)dst_p, (char*)src, size - size_aligned);
+    }
+}
+
+#elif __AVX2__
+#pragma message("AVX2 selected")
+
+void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
+{
+    const uint8_t align = 64;
+    uintptr_t dst_aligned = (((uintptr_t)(dst) + align - 1) / align) * align;
+    if ((uintptr_t)dst != dst_aligned) {
+        size_t s = dst_aligned - (uintptr_t)dst;
+        memcpy((char*)dst, (char*)src, s);
+        size -= s;
+        src += s;
+    }
+    const uint8_t avx_len = 32;
+    uintptr_t size_aligned = (size / avx_len) * avx_len;
+    uintptr_t dst_p = dst_aligned;
+    for (; dst_p < dst_aligned + size_aligned; dst_p += avx_len, src += avx_len) {
+        _mm256_stream_si256((__m256i*)dst_p, _mm256_loadu_si256((__m256i*)src));
+    }
+    if (size_aligned != size) {
+        memcpy((char*)dst_p, (char*)src, size - size_aligned);
+    }
+}
+#else
+#warning "nomal memcpy"
+void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
+{
+    memcpy(dst, src, size);
+}
+#endif
+
 void FrameBuilder::main()
 {
     if (!next_frame_) {
@@ -98,19 +154,19 @@ void FrameBuilder::main()
             for (int seg = 0; seg < pays->no_of_payload; seg++) {
                 auto len = pays->segments[seg].length;
                 if (write_head_ + len < Frame::frame_size) {
-                    memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
+                    lng_memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
                     write_head_ += len;
                 } else if (write_head_ < Frame::frame_size) {
-                    size_t bytes_cur_frame = write_head_ + len - Frame::frame_size;
+                    size_t bytes_cur_frame = Frame::frame_size - write_head_;
                     size_t bytes_next_frame = len - bytes_cur_frame;
                     uint8_t* p = pays->segments[seg].payload;
-                    memcpy(frame->body + write_head_, p, bytes_cur_frame);
-                    memcpy(next_frame_->body, p + bytes_cur_frame, bytes_next_frame);
+                    lng_memcpy(frame->body + write_head_, p, bytes_cur_frame);
+                    lng_memcpy(next_frame_->body, p + bytes_cur_frame, bytes_next_frame);
                     write_head_ = bytes_next_frame;
 
                     complete = true;
                 } else {
-                    memcpy(next_frame_->body + write_head_, pays->segments[seg].payload, len);
+                    lng_memcpy(next_frame_->body + write_head_, pays->segments[seg].payload, len);
                     write_head_ += len;
                 }
             }

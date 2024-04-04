@@ -1,3 +1,4 @@
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -22,10 +23,11 @@ void handler_sigint(int sig)
 
 class FrameReceiver : public Actor {
 public:
-    FrameReceiver(const std::string& id, int cpu_id, Stream<Frame*>* valid_frame, Stream<Frame*>* ready_frame)
+    FrameReceiver(const std::string& id, int cpu_id, Stream<Frame*>* valid_frame, Stream<Frame*>* ready_frame, const std::string output_file)
         : Actor(id, cpu_id)
         , valid_stream_(valid_frame)
         , ready_stream_(ready_frame)
+        , output_file_(output_file)
     {
     }
 
@@ -35,6 +37,11 @@ protected:
         Frame* v;
         if (valid_stream_->get(&v)) {
             std::cout << "received " << v->frame_id << " frame" << std::endl;
+            if (!output_first_file_ && output_file_ != "") {
+                std::ofstream ofs_(output_file_.c_str());
+                ofs_.write(reinterpret_cast<char*>(v->body), Frame::frame_size);
+                output_first_file_ = true;
+            }
             ready_stream_->put(v);
         }
     }
@@ -42,6 +49,8 @@ protected:
 private:
     Stream<Frame*>* valid_stream_;
     Stream<Frame*>* ready_stream_;
+    bool output_first_file_ = false;
+    std::string output_file_;
 };
 
 //                 +----------+                    +--------+
@@ -84,7 +93,8 @@ int main()
             &ready_frame_stream));
         auto frame_receiver(sys.create_actor<FrameReceiver>("/frame", 6,
             &valid_frame_stream,
-            &ready_frame_stream));
+            &ready_frame_stream,
+            "recv.dat"));
 
         sys.start();
 

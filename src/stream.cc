@@ -161,6 +161,7 @@ DPDKStream::Impl::Impl(uint16_t port_id)
 
 void DPDKStream::Impl::wait_for_3wayhandshake()
 {
+
     while (true) {
         rte_mbuf* v;
         if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
@@ -174,6 +175,17 @@ void DPDKStream::Impl::wait_for_3wayhandshake()
         tcp_port = tcp->dst_port;
 
         rte_pktmbuf_free(v);
+        break;
+    }
+
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
+            continue;
         break;
     }
 }
