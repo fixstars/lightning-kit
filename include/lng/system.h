@@ -6,6 +6,8 @@
 #include <unordered_map>
 
 #include "lng/actor.h"
+#include "lng/runtime.h"
+#include "lng/stream.h"
 
 namespace lng {
 
@@ -27,6 +29,14 @@ public:
         return *actor;
     }
 
+    template<typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr,
+        typename std::enable_if<std::is_base_of<Actor, T>::value>::type* = nullptr>
+    std::shared_ptr<T> create_stream(Args... args)
+    {
+        return std::make_shared<T>(select_runtime(Runtime::DPDK), args...);
+    }
+
     void start();
 
     void stop();
@@ -36,6 +46,8 @@ public:
 
 private:
     void register_actor(const std::string& id, const std::shared_ptr<Actor>& actor);
+
+    std::shared_ptr<Runtime> select_runtime(Runtime::Type type);
 
     std::shared_ptr<Impl> impl_;
 };

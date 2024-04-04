@@ -11,6 +11,8 @@ struct rte_mempool;
 
 namespace lng {
 
+class DPDKRuntime;
+
 template <typename T>
 class Stream {
 public:
@@ -61,7 +63,7 @@ private:
 class DPDKStream : public Stream<rte_mbuf*> {
 
     struct Impl {
-        rte_mempool* mbuf_pool;
+        std::shared_ptr<DPDKRuntime> rt;
         uint16_t port_id;
         uint16_t tcp_port;
         bool send_ack(rte_mbuf* recv_mbuf, size_t length);
@@ -69,7 +71,7 @@ class DPDKStream : public Stream<rte_mbuf*> {
         void wait_for_3wayhandshake();
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
-        Impl(uint16_t port_id);
+        Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id);
         ~Impl();
 
     private:
@@ -77,8 +79,8 @@ class DPDKStream : public Stream<rte_mbuf*> {
     };
 
 public:
-    DPDKStream(uint16_t port_id)
-        : impl_(new Impl(port_id))
+    DPDKStream(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
     {
     }
 

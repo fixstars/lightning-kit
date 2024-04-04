@@ -58,10 +58,11 @@ set(LNG_CORE_SRC
     src/receiver-actor.cc
     src/event.cc
     src/log.cc
+    src/runtime.cc
     src/stream.cc
     src/system.cc
     )
-if(LNG_WITH_CUDA)
+if(LNG_WITH_CUDA AND LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/protocol_tcp.cu
         src/protocol_udp.cu)

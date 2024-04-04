@@ -1,24 +1,13 @@
 #include "lng/system.h"
 
-#if defined(LNG_WITH_DOCA)
-#include "lng/doca-util.h"
-#endif
-
-#if defined(LNG_WITH_DPDK)
-#include "dpdk-runtime.h"
-#endif
-
+#include "lng/runtime.h"
 #include "log.h"
 
 namespace lng {
 
 struct System::Impl {
-
+    std::unordered_map<Runtime::Type, std::shared_ptr<Runtime>> runtimes;
     std::unordered_map<std::string, std::shared_ptr<Actor>> actors;
-
-#if defined(LNG_WITH_DPDK)
-    DPDKRuntime dpdk_rt;
-#endif
 };
 
 System::System()
@@ -27,12 +16,21 @@ System::System()
     log::debug("System is initialized");
 
 #if defined(LNG_WITH_DOCA)
-    doca_log_backend_create_standard();
+    impl_->runtimes[Runtime::DOCA] = std::make_shared<DOCARuntime>();
 #endif
+
+#if defined(LNG_WITH_DPDK)
+    impl_->runtimes[Runtime::DPDK] = std::make_shared<DPDKRuntime>();
+#endif
+
 }
 
 void System::start()
 {
+    for (auto& [_, rt] : impl_->runtimes) {
+        rt->start();
+    }
+
     // TODO: Considering tree dependency
     for (auto& [id, actor] : impl_->actors) {
         actor->start();
@@ -55,6 +53,10 @@ void System::stop()
     for (auto& [n, actor] : impl_->actors) {
         actor->wait_until(Actor::State::Ready);
     }
+
+    for (auto& [_, rt] : impl_->runtimes) {
+        rt->stop();
+    }
 }
 
 void System::terminate()
@@ -72,6 +74,10 @@ void System::terminate()
 
 void System::register_actor(const std::string& id, const std::shared_ptr<Actor>& actor) {
     impl_->actors[id] = actor;
+}
+
+std::shared_ptr<Runtime> System::select_runtime(Runtime::Type type) {
+    return impl_->runtimes[type];
 }
 
 } // lng
