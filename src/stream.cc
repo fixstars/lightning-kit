@@ -2,6 +2,7 @@
 #include <rte_eal.h>
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
+#include <rte_net.h>
 #endif
 
 #include "lng/stream.h"
@@ -169,6 +170,9 @@ void DPDKStream::Impl::wait_for_3wayhandshake()
         if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
             continue;
         send_synack(v);
+
+        tcp_port = tcp->dst_port;
+
         rte_pktmbuf_free(v);
         break;
     }
@@ -255,6 +259,32 @@ bool DPDKStream::Impl::send_synack(rte_mbuf* recv_mbuf)
 bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, size_t length)
 {
     return send_flag_packet(recv_mbuf, length, RTE_TCP_ACK_FLAG);
+}
+
+bool DPDKStream::Impl::check_target_packet(rte_mbuf* recv_mbuf)
+{
+    auto eh = rte_pktmbuf_mtod(recv_mbuf, rte_ether_hdr*);
+    if (rte_be_to_cpu_16(eh->ether_type) == RTE_ETHER_TYPE_ARP) {
+        // TODO reply arp
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    rte_net_hdr_lens hdr_lens;
+    auto packet_type = rte_net_get_ptype(recv_mbuf, &hdr_lens, RTE_PTYPE_ALL_MASK);
+    if (!RTE_ETH_IS_IPV4_HDR(packet_type) || ((packet_type & RTE_PTYPE_L4_MASK) != RTE_PTYPE_L4_TCP)) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    auto* tcp = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
+    if (tcp->dst_port != tcp_port) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    if (tcp->tcp_flags & RTE_TCP_SYN_FLAG) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    return true;
 }
 
 } // lng

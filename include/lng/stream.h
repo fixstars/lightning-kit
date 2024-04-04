@@ -63,9 +63,11 @@ class DPDKStream : public Stream<rte_mbuf*> {
     struct Impl {
         rte_mempool* mbuf_pool;
         uint16_t port_id;
+        uint16_t tcp_port;
         bool send_ack(rte_mbuf* recv_mbuf, size_t length);
         bool send_synack(rte_mbuf* tar);
         void wait_for_3wayhandshake();
+        bool check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(uint16_t port_id);
         ~Impl();
@@ -87,6 +89,10 @@ public:
     bool send_ack(rte_mbuf* recv_mbuf, size_t length)
     {
         return impl_->send_ack(recv_mbuf, length);
+    }
+    bool check_target_packet(rte_mbuf* recv_mbuf)
+    {
+        return impl_->check_target_packet(recv_mbuf);
     }
 
 private:

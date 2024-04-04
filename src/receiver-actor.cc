@@ -60,6 +60,11 @@ void Receiver::main()
         rte_mbuf* v;
         if (nic_stream_->get(&v)) {
             // std::cout << "received " << v->pkt_len << " bytes" << std::endl;
+            if (!nic_stream_->check_target_packet(v)) {
+                continue;
+            }
+
+            // TODO detect FIN and quit
 
             auto len = pays->ExtractPayloads(v);
 
