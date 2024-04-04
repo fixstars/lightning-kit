@@ -602,6 +602,16 @@ int sending_tcp_data(void* arg1)
             if (!g_running) {
                 break;
             }
+
+            if (bandwidth_in_gbps) {
+                sent_in_bytes += payload_size;
+
+                auto stop_time = (8 * sent_in_bytes / (bandwidth_in_gbps * 1024.0 * 1024.0 * 1024.0)) - (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ts1).count() / 1000.0);
+
+                if (stop_time > 0) {
+                    usleep(static_cast<int>(stop_time * 1000 * 1000));
+                }
+            }
         }
 
         if ((n++ % 100) == 0) {
@@ -777,6 +787,13 @@ std::vector<int> calc_virtual_dev_port_ids(std::vector<int>& mlx_port_id)
     return res;
 }
 
+void init_send_buf(std::vector<uint8_t>& send_buf)
+{
+    for (size_t i = 0; i < send_buf.size(); ++i) {
+        send_buf[i] = (uint8_t)i;
+    }
+}
+
 int main(int argc, char** argv)
 {
     argparse::ArgumentParser program("program_name");
@@ -841,6 +858,10 @@ int main(int argc, char** argv)
         .help("specify the chunk size for one rx")
         .scan<'u', uint32_t>();
 
+    program.add_argument("--output_sent_file")
+        .default_value<std::string>("")
+        .help("specify the filename");
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -864,6 +885,7 @@ int main(int argc, char** argv)
     size_t frame_size = program.get<size_t>("--frame_size");
     uint32_t frame_num = program.get<uint32_t>("--frame_num");
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
+    std::string output_file = program.get<std::string>("--output_sent_file");
 
     auto socket_mem = get_socket_mem(lcores);
 
@@ -871,6 +893,14 @@ int main(int argc, char** argv)
     // when dev_mlx_port_ids is 1,4,3, dpdk rename it to 0,2,1
     std::vector<int> virtual_dev_port_ids = calc_virtual_dev_port_ids(dev_mlx_port_ids);
     auto core_v = split_int(lcores);
+
+    std::vector<uint8_t> send_buf(frame_size);
+    init_send_buf(send_buf);
+
+    if (output_file != "") {
+        std::ofstream ofs(output_file.c_str());
+        ofs.write((char*)(&send_buf[0]), send_buf.size());
+    }
 
     std::vector<client_args> client_argses(core_v.size());
     for (int i = 0; i < client_argses.size(); ++i) {
@@ -883,7 +913,7 @@ int main(int argc, char** argv)
         client_argses.at(i).server_port = std::stoi(server_tcp_ports.at(i));
         client_argses.at(i).client_port = std::stoi(client_tcp_ports.at(i));
         client_argses.at(i).bandwidth_in_gbps = bandwidth_in_gbps;
-        client_argses.at(i).send_buf = std::vector<uint8_t>(frame_size);
+        client_argses.at(i).send_buf = send_buf;
         client_argses.at(i).send_buf_num = frame_num;
         client_argses.at(i).chunk_size = chunk_size;
     }
