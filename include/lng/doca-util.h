@@ -192,13 +192,6 @@ struct ready_buf_info {
     uint64_t is_ready;
 };
 
-#define FRAME_SIZE (128 * 1024 * 1024)
-
-// to be deleted
-struct Frame {
-    uint8_t data[FRAME_SIZE];
-};
-
 doca_error_t
 init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dpdk_port_id);
 
