@@ -1,4 +1,5 @@
 #if defined(LNG_WITH_DOCA) || defined(LNG_WITH_DPDK)
+#include <rte_arp.h>
 #include <rte_eal.h>
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
@@ -9,6 +10,102 @@
 #include "log.h"
 
 namespace lng {
+
+namespace {
+
+void make_arp_reply(rte_mbuf *buf, rte_ether_hdr *eth_h)
+{
+    auto arp_h = (rte_arp_hdr *) ((char *)eth_h + sizeof(rte_ether_hdr));
+    auto arp_op = rte_be_to_cpu_16(arp_h->arp_opcode);
+    auto arp_pro = rte_be_to_cpu_16(arp_h->arp_protocol);
+
+    if ((rte_be_to_cpu_16(arp_h->arp_hardware) != RTE_ARP_HRD_ETHER) ||
+        (arp_pro != RTE_ETHER_TYPE_IPV4) ||
+        (arp_h->arp_hlen != 6) ||
+        (arp_h->arp_plen != 4)
+       ) {
+        rte_pktmbuf_free(buf);
+        auto msg = "Unexpected ARP packet header";
+        log::error(msg);
+        throw std::runtime_error(msg);
+    }
+
+    if (arp_op != RTE_ARP_OP_REQUEST) {
+        rte_pktmbuf_free(buf);
+        auto msg = fmt::format("DPDK: Unexpected ARP operation : %d", arp_op);
+        log::error(msg);
+        throw std::runtime_error(msg);
+    }
+
+    /* Use source MAC address as destination MAC address. */
+    rte_ether_addr_copy(&eth_h->src_addr, &eth_h->dst_addr);
+    /* Set source MAC address with MAC address of TX port */
+    rte_ether_addr_copy(&server_eth_addr, &eth_h->src_addr);
+
+    arp_h->arp_opcode = rte_cpu_to_be_16(RTE_ARP_OP_REPLY);
+
+    rte_ether_addr_copy(&arp_h->arp_data.arp_sha, &arp_h->arp_data.arp_tha);
+    rte_ether_addr_copy(&eth_h->src_addr, &arp_h->arp_data.arp_sha);
+
+    /* Swap IP addresses in ARP payload */
+    std::swap(arp_h->arp_data.arp_sip, arp_h->arp_data.arp_tip);
+}
+
+std::vector<std::tuple<std::string, rte_ether_addr>> get_netdev() {
+
+    std::vector<std::tuple<std::string, std::string>> netdevs;
+
+    auto if_nidxs = if_nameindex();
+    if (if_nidxs == NULL ) {
+        return netdevs;
+    }
+
+    for (auto if_itr = if_nidxs; if_itr->if_index != 0 || if_itr->if_name != NULL; ++if_itr) {
+
+        auto fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+        //Type of address to retrieve - IPv4 IP address
+        ifreq if_req;
+        if_req.ifr_addr.sa_family = AF_INET;
+
+        //Copy the interface name in the ifreq structure
+        strncpy(if_req.ifr_name, if_itr->if_name , IFNAMSIZ-1);
+
+        if (ioctl(fd, SIOCGIFADDR, &ifr) == -1) {
+            close(fd);
+            auto msg = "SIOCGIFADDR";
+            log::error(msg);
+            throw std::runtime_error(msg);
+        }
+
+        std::string ip_addr(inet_ntoa(( (struct sockaddr_in *)&if_req.ifr_addr )->sin_addr));
+
+        if (ioctl(fd, SIOCGIFHWADDR, &ifr) == -1) {
+            close(fd);
+            auto msg = "SIOCGIFHWADDR";
+            log::error(msg);
+            throw std::runtime_error(msg);
+        }
+
+        close(fd);
+
+        auto *eth_addr = reinterpret_cast<uint8_t*>(if_req.ifr_hwaddr.sa_data);
+
+        // printf("%s -> %s, %02x:%02x:%02x:%02x:%02x:%02x\n", if_itr->if_name, ip_addr.c_str(), eth_addr[0], eth_addr[1], eth_addr[2], eth_addr[3], eth_addr[4], eth_addr[5]);
+
+        netdevs.push_back(std::make_tuple(ip_addr, ));
+    }
+
+    if_freenameindex(if_nidxs);
+
+    return 0;
+}
+
+}
+
+DPDKStream::from_eth_addr(const std::string& eth_addr) {
+
+}
 
 DPDKStream::Impl::Impl(uint16_t port_id)
     : port_id(port_id)
@@ -134,12 +231,11 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     // Retrieve the port mac address
-    rte_ether_addr addr;
-    ret = rte_eth_macaddr_get(port_id, &addr);
+    ret = rte_eth_macaddr_get(port_id, &self_eth_addr);
     if (ret != 0) {
         throw std::runtime_error(fmt::format("Failed to get mac address: {}", strerror(-ret)));
     }
-    log::info("Port {} MAC: {:x}::{:x}::{:x}::{:x}::{:x}::{:x}", port_id, RTE_ETHER_ADDR_BYTES(&addr));
+    log::info("Port {} MAC: {:x}::{:x}::{:x}::{:x}::{:x}::{:x}", port_id, RTE_ETHER_ADDR_BYTES(&self_eth_addr));
 
     ret = rte_eth_promiscuous_enable(port_id);
     if (ret < 0) {
@@ -154,6 +250,8 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
+
+    process_arp(self_eth_addr);
 }
 
 DPDKStream::Impl::~Impl() {
@@ -187,11 +285,10 @@ void DPDKStream::put(rte_mbuf *v) {
 }
 
 bool DPDKStream::get(rte_mbuf **vp) {
-        if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
-            return false;
-        }
-        return true;
+    if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
+        return false;
     }
-
+    return true;
+}
 
 } // lng

@@ -52,11 +52,17 @@ class DPDKStream : public Stream<rte_mbuf*> {
         rte_mempool *mbuf_pool;
         uint16_t port_id;
 
+        rte_ether_addr self_eth_addr;
+        rte_ether_addr peer_eth_addr;
+
         Impl(uint16_t port_id);
         ~Impl();
     };
 
 public:
+    static from_eth_addr(const std::string& eth_addr);
+    static from_ip_addr(const std::string& ip_addr);
+
     DPDKStream(uint16_t port_id) : impl_(new Impl(port_id)) { }
 
     virtual void put(rte_mbuf *v);

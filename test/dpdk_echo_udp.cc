@@ -26,11 +26,12 @@ public:
 
 protected:
     virtual void main() override {
-        rte_mbuf *v;
-        if (outer_stream_->get(&v)) {
-            std::cout << "received " << v->pkt_len << " bytes" << std::endl;
-            inner_stream_->put(v);
+        rte_mbuf *buf;
+        if (!outer_stream_->get(&buf)) {
+            return;
         }
+
+        inner_stream_->put(buf);
     }
 
 private:
