@@ -67,7 +67,7 @@ class DPDKStream : public Stream<rte_mbuf*> {
         rte_mempool* mbuf_pool;
         uint16_t port_id;
         uint16_t tcp_port;
-        bool send_ack(rte_mbuf* recv_mbuf, size_t length);
+        bool send_ack(rte_mbuf* recv_mbuf, uint32_t length);
         bool send_synack(rte_mbuf* tar);
         void wait_for_3wayhandshake();
         bool check_target_packet(rte_mbuf* recv_mbuf);
@@ -76,7 +76,7 @@ class DPDKStream : public Stream<rte_mbuf*> {
         ~Impl();
 
     private:
-        bool send_flag_packet(rte_mbuf* tar, size_t length, uint8_t tcp_flags);
+        bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
     };
 
 public:
@@ -89,7 +89,7 @@ public:
 
     virtual size_t get(rte_mbuf** vp, size_t max);
 
-    bool send_ack(rte_mbuf* recv_mbuf, size_t length)
+    bool send_ack(rte_mbuf* recv_mbuf, uint32_t length)
     {
         return impl_->send_ack(recv_mbuf, length);
     }
@@ -217,7 +217,7 @@ struct Payloads {
     Segment segments[max_payloads];
     size_t dropped_bytes = 0;
     void Clear();
-    size_t ExtractPayloads(rte_mbuf* mbuf);
+    uint32_t ExtractPayloads(rte_mbuf* mbuf);
 };
 
 struct Frame {
