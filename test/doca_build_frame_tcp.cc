@@ -5,8 +5,6 @@
 
 #include <signal.h>
 
-#include <rte_mbuf.h>
-
 #include "lng/lng.h"
 
 using namespace std::chrono_literals;
@@ -20,7 +18,7 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+    Receiver(const std::string& id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
         : Actor(id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -30,21 +28,21 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v[1];
-        if (size_t num = outer_stream_->get(v, 1)) {
-            std::cout << "received " << v[0]->pkt_len << " bytes" << std::endl;
+        uint8_t* v[1000];
+        if (size_t num = outer_stream_->get((uint8_t**)(v), 1000)) {
+            // std::cout << "received " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             inner_stream_->put(v, num);
         }
     }
 
 private:
-    Stream<rte_mbuf*>* inner_stream_;
-    Stream<rte_mbuf*>* outer_stream_;
+    Stream<uint8_t*>* inner_stream_;
+    Stream<uint8_t*>* outer_stream_;
 };
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+    Sender(const std::string& id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
         : Actor(id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -54,16 +52,16 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v[1];
-        if (size_t num = inner_stream_->get(v, 1)) {
-            std::cout << "send " << v[0]->pkt_len << " bytes" << std::endl;
+        uint8_t* v[1000];
+        if (size_t num = inner_stream_->get((uint8_t**)(v), 1000)) {
+            // std::cout << "send " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             outer_stream_->put(v, num);
         }
     }
 
 private:
-    Stream<rte_mbuf*>* inner_stream_;
-    Stream<rte_mbuf*>* outer_stream_;
+    Stream<uint8_t*>* inner_stream_;
+    Stream<uint8_t*>* outer_stream_;
 };
 
 //                 +----------+                    +--------+
@@ -76,8 +74,8 @@ int main()
 
         System sys;
 
-        DPDKStream outer_stream(2);
-        MemoryStream<rte_mbuf*> inner_stream;
+        DOCATCPStream outer_stream("a1:00.1", "81:00.0");
+        MemoryStream<uint8_t*> inner_stream;
 
         auto receiver(sys.create_actor<Receiver>("/receiver",
             &inner_stream,
