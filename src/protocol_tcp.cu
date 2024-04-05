@@ -582,7 +582,8 @@ __global__ void cuda_kernel_makeframe(
 }
 
 __global__ void frame_notice(
-    uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame, bool is_warmup)
+    uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
+    int* is_fin, bool is_warmup)
 {
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -593,9 +594,8 @@ __global__ void frame_notice(
     doca_error_t ret;
     __shared__ enum doca_gpu_semaphore_status status;
     if (threadIdx.x == 0) {
-        bool fin = false;
         int frame_counter = 0;
-        while (!fin) {
+        while ((!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
             ret = doca_gpu_dev_semaphore_get_status(sem_frame, frame_counter, &status);
             if (ret != DOCA_SUCCESS) {
                 printf("TCP semaphore error");
@@ -627,13 +627,13 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         0, nullptr,
         nullptr, true);
 
-    // frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, true);
+    frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
 
-    streams.resize(2);
+    streams.resize(3);
 
     cudaStreamCreate(&streams[0]);
     cudaStreamCreate(&streams[1]);
-    // cudaStreamCreate(&streams[2]);
+    cudaStreamCreate(&streams[2]);
 }
 
 void launch_tcp_kernels(struct rx_queue* rxq,
@@ -673,7 +673,13 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         sem_fr->sem_num, sem_fr->sem_gpu,
         is_fin, false);
 
-    // frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, false);
+    frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
+
+    cudaStreamSynchronize(streams[0]);
+    cudaStreamSynchronize(streams[1]);
+    cudaStreamSynchronize(streams[2]);
+    cudaDeviceSynchronize();
+    exit(0);
 }
 
 }
