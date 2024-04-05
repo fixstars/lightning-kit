@@ -21,7 +21,8 @@ public:
 protected:
     virtual void main() override
     {
-        stream_->put(v_++);
+        stream_->put(&v_, 1);
+        v_++;
     }
 
 private:
@@ -41,8 +42,9 @@ public:
 protected:
     virtual void main() override
     {
-        int v = 0;
-        if (stream_->get(&v)) {
+        int v[1];
+        v[0] = 0;
+        if (stream_->get(v, 1)) {
             std::cout << "Consuming " << v << std::endl;
         }
     }
