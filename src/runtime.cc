@@ -41,12 +41,14 @@ void DPDKRuntime::start() {
     constexpr uint32_t cache_size = 256;
     constexpr uint32_t data_room_size = RTE_PKTMBUF_HEADROOM + 10 * 1024;
 
+    log::info("Trying to create mempool");
+
     mbuf_pool_ = rte_pktmbuf_pool_create("mbuf_pool", n, cache_size, 0, data_room_size, rte_socket_id());
     if (mbuf_pool_ == nullptr) {
+        log::error("Failed to create mempool");
         throw std::runtime_error(fmt::format("Cannot create mbuf pool, n={}, cache_size={}, priv_size=0, data_room_size={}",
                                              n, cache_size, data_room_size));
     }
-
 }
 
 void DPDKRuntime::stop() {

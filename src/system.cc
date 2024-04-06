@@ -7,6 +7,7 @@ namespace lng {
 
 struct System::Impl {
     std::unordered_map<Runtime::Type, std::shared_ptr<Runtime>> runtimes;
+    std::vector<std::shared_ptr<Stream>> streams;
     std::unordered_map<std::string, std::shared_ptr<Actor>> actors;
 };
 
@@ -14,21 +15,16 @@ System::System()
     : impl_(new Impl)
 {
     log::debug("System is initialized");
-
-#if defined(LNG_WITH_DOCA)
-    impl_->runtimes[Runtime::DOCA] = std::make_shared<DOCARuntime>();
-#endif
-
-#if defined(LNG_WITH_DPDK)
-    impl_->runtimes[Runtime::DPDK] = std::make_shared<DPDKRuntime>();
-#endif
-
 }
 
 void System::start()
 {
     for (auto& [_, rt] : impl_->runtimes) {
         rt->start();
+    }
+
+    for (auto& st : impl_->streams) {
+        st->start();
     }
 
     // TODO: Considering tree dependency
@@ -54,6 +50,10 @@ void System::stop()
         actor->wait_until(Actor::State::Ready);
     }
 
+    for (auto& st : impl_->streams) {
+        st->stop();
+    }
+
     for (auto& [_, rt] : impl_->runtimes) {
         rt->stop();
     }
@@ -74,6 +74,26 @@ void System::terminate()
 
 void System::register_actor(const std::string& id, const std::shared_ptr<Actor>& actor) {
     impl_->actors[id] = actor;
+}
+
+void System::register_stream(const std::shared_ptr<Stream>& stream) {
+    impl_->streams.push_back(stream);
+}
+
+void System::register_runtime(Runtime::Type type) {
+#if defined(LNG_WITH_DOCA)
+    if (type == Runtime::DOCA && !impl_->runtimes.count(type)) {
+        impl_->runtimes[type] = std::make_shared<DOCARuntime>();
+        return;
+    }
+#endif
+
+#if defined(LNG_WITH_DPDK)
+    if (type == Runtime::DPDK && !impl_->runtimes.count(type)) {
+        impl_->runtimes[type] = std::make_shared<DPDKRuntime>();
+        return;
+    }
+#endif
 }
 
 std::shared_ptr<Runtime> System::select_runtime(Runtime::Type type) {

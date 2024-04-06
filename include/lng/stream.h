@@ -13,15 +13,21 @@ namespace lng {
 
 class DPDKRuntime;
 
-template <typename T>
 class Stream {
 public:
+    virtual void start() = 0;
+    virtual void stop() = 0;
+};
+
+template<typename T>
+class Queueable {
+ public:
     virtual void put(T v) = 0;
     virtual bool get(T* vp) = 0;
 };
 
 template <typename T>
-class MemoryStream : public Stream<T> {
+class MemoryStream : public Stream, public Queueable<T> {
 
     struct Impl {
 #ifdef BLOCKINGQUEUE
@@ -36,6 +42,9 @@ public:
         : impl_(new Impl)
     {
     }
+
+    virtual void start() {}
+    virtual void stop() {}
 
     virtual void put(T v)
     {
@@ -60,7 +69,7 @@ private:
 
 #if defined(LNG_WITH_DOCA) || defined(LNG_WITH_DPDK)
 
-class DPDKStream : public Stream<rte_mbuf*> {
+class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
 
     struct Impl {
         std::shared_ptr<DPDKRuntime> rt;
@@ -71,8 +80,9 @@ class DPDKStream : public Stream<rte_mbuf*> {
         void wait_for_3wayhandshake();
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
-        Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id);
-        ~Impl();
+        Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
+            : rt(rt), port_id(port_id)
+        {}
 
     private:
         bool send_flag_packet(rte_mbuf* tar, size_t length, uint8_t tcp_flags);
@@ -83,6 +93,9 @@ public:
         : impl_(new Impl(rt, port_id))
     {
     }
+
+    virtual void start();
+    virtual void stop();
 
     virtual void put(rte_mbuf* v);
 

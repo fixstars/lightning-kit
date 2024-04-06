@@ -22,7 +22,9 @@ void handler_sigint(int sig)
 
 class FrameReceiver : public Actor {
 public:
-    FrameReceiver(const std::string& id, int cpu_id, Stream<Frame*>* valid_frame, Stream<Frame*>* ready_frame)
+    FrameReceiver(const std::string& id, int cpu_id,
+                  const std::shared_ptr<Queueable<Frame*>>& valid_frame,
+                  const std::shared_ptr<Queueable<Frame*>>& ready_frame)
         : Actor(id, cpu_id)
         , valid_stream_(valid_frame)
         , ready_stream_(ready_frame)
@@ -40,8 +42,8 @@ protected:
     }
 
 private:
-    Stream<Frame*>* valid_stream_;
-    Stream<Frame*>* ready_stream_;
+    std::shared_ptr<Queueable<Frame*>> valid_stream_;
+    std::shared_ptr<Queueable<Frame*>> ready_stream_;
 };
 
 //                 +----------+                    +--------+
@@ -54,37 +56,37 @@ int main()
 
         System sys;
 
-        DPDKStream dpdk_stream(1);
-        MemoryStream<Frame*> valid_frame_stream;
-        MemoryStream<Frame*> ready_frame_stream;
-        MemoryStream<Payloads*> valid_payload_stream;
-        MemoryStream<Payloads*> ready_payload_stream;
+        auto dpdk_stream = sys.create_stream<DPDKStream>(1);
+        auto valid_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
+        auto ready_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
+        auto valid_payload_stream = sys.create_stream<MemoryStream<Payloads*>>();
+        auto ready_payload_stream = sys.create_stream<MemoryStream<Payloads*>>();
 
         const int num_pays = 1024;
         std::unique_ptr<Payloads> pays[num_pays];
         for (int i = 0; i < num_pays; ++i) {
             pays[i].reset(new Payloads);
-            ready_payload_stream.put(pays[i].get());
+            ready_payload_stream->put(pays[i].get());
         }
         const int num_frames = 8;
         std::unique_ptr<Frame> frames[num_frames];
         for (int i = 0; i < num_frames; ++i) {
             frames[i].reset(new Frame);
-            ready_frame_stream.put(frames[i].get());
+            ready_frame_stream->put(frames[i].get());
         }
 
         auto receiver(sys.create_actor<Receiver>("/frame/build/eth", 4,
-            &dpdk_stream,
-            &valid_payload_stream,
-            &ready_payload_stream));
+            dpdk_stream,
+            valid_payload_stream,
+            ready_payload_stream));
         auto frame_builder(sys.create_actor<FrameBuilder>("/frame/build", 5,
-            &valid_payload_stream,
-            &ready_payload_stream,
-            &valid_frame_stream,
-            &ready_frame_stream));
+            valid_payload_stream,
+            ready_payload_stream,
+            valid_frame_stream,
+            ready_frame_stream));
         auto frame_receiver(sys.create_actor<FrameReceiver>("/frame", 6,
-            &valid_frame_stream,
-            &ready_frame_stream));
+            valid_frame_stream,
+            ready_frame_stream));
 
         sys.start();
 

@@ -12,12 +12,32 @@
 
 namespace lng {
 
-DPDKStream::Impl::Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
-    : rt(rt), port_id(port_id)
+void DPDKStream::Impl::wait_for_3wayhandshake()
+{
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
+            continue;
+        send_synack(v);
+
+        tcp_port = tcp->dst_port;
+
+        rte_pktmbuf_free(v);
+        break;
+    }
+}
+
+void DPDKStream::start()
 {
     int ret = 0;
 
     constexpr uint32_t mtu = 9000;
+
+    auto port_id = impl_->port_id;
 
     // Initializing all ports
     if (!rte_eth_dev_is_valid_port(port_id)) {
@@ -90,7 +110,7 @@ DPDKStream::Impl::Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
     rte_eth_rxconf rxconf = dev_info.default_rxconf;
     // rxconf.offloads = port_conf.rxmode.offloads;
     for (auto q = 0; q < rx_rings; q++) {
-        ret = rte_eth_rx_queue_setup(port_id, q, rx_desc_size, rte_eth_dev_socket_id(port_id), &rxconf, rt->get_mempool());
+        ret = rte_eth_rx_queue_setup(port_id, q, rx_desc_size, rte_eth_dev_socket_id(port_id), &rxconf, impl_->rt->get_mempool());
         if (ret < 0) {
             throw std::runtime_error(fmt::format("Failed to setup Rx queue: {}", strerror(-ret)));
         }
@@ -135,30 +155,13 @@ DPDKStream::Impl::Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
 
-    wait_for_3wayhandshake();
+    impl_->wait_for_3wayhandshake();
 }
 
-void DPDKStream::Impl::wait_for_3wayhandshake()
+void DPDKStream::stop()
 {
-    while (true) {
-        rte_mbuf* v;
-        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
-            continue;
-        }
-        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
-        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
-            continue;
-        send_synack(v);
+    auto port_id = impl_->port_id;
 
-        tcp_port = tcp->dst_port;
-
-        rte_pktmbuf_free(v);
-        break;
-    }
-}
-
-DPDKStream::Impl::~Impl()
-{
     auto ret = rte_eth_dev_stop(port_id);
     if (ret < 0) {
         log::error("Failed to stop device: {}", strerror(-ret));

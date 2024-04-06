@@ -9,9 +9,9 @@ class Receiver : public Actor {
 public:
     Receiver(const std::string& id,
         int cpu_id,
-        DPDKStream* dpdk_st,
-        Stream<Payloads*>* valid,
-        Stream<Payloads*>* ready)
+        const std::shared_ptr<DPDKStream>& dpdk_st,
+        const std::shared_ptr<Queueable<Payloads*>>& valid,
+        const std::shared_ptr<Queueable<Payloads*>>& ready)
         : Actor(id, cpu_id)
         , nic_stream_(dpdk_st)
         , vaild_payload_stream_(valid)
@@ -23,19 +23,19 @@ protected:
     virtual void main() override;
 
 private:
-    DPDKStream* nic_stream_;
-    Stream<Payloads*>* vaild_payload_stream_;
-    Stream<Payloads*>* ready_payload_stream_;
+    std::shared_ptr<DPDKStream> nic_stream_;
+    std::shared_ptr<Queueable<Payloads*>> vaild_payload_stream_;
+    std::shared_ptr<Queueable<Payloads*>> ready_payload_stream_;
 };
 
 class FrameBuilder : public Actor {
 public:
     FrameBuilder(const std::string& id,
         int cpu_id,
-        Stream<Payloads*>* valid_payload,
-        Stream<Payloads*>* ready_payload,
-        Stream<Frame*>* valid_frame,
-        Stream<Frame*>* ready_frame)
+        const std::shared_ptr<Queueable<Payloads*>>& valid_payload,
+        const std::shared_ptr<Queueable<Payloads*>>& ready_payload,
+        const std::shared_ptr<Queueable<Frame*>>& valid_frame,
+        const std::shared_ptr<Queueable<Frame*>>& ready_frame)
         : Actor(id, cpu_id)
         , vaild_payload_stream_(valid_payload)
         , ready_payload_stream_(ready_payload)
@@ -51,10 +51,10 @@ protected:
     virtual void main() override;
 
 private:
-    Stream<Payloads*>* vaild_payload_stream_;
-    Stream<Payloads*>* ready_payload_stream_;
-    Stream<Frame*>* vaild_frame_stream_;
-    Stream<Frame*>* ready_frame_stream_;
+    std::shared_ptr<Queueable<Payloads*>> vaild_payload_stream_;
+    std::shared_ptr<Queueable<Payloads*>> ready_payload_stream_;
+    std::shared_ptr<Queueable<Frame*>> vaild_frame_stream_;
+    std::shared_ptr<Queueable<Frame*>> ready_frame_stream_;
     size_t frame_id_;
     size_t write_head_;
     Frame* next_frame_;

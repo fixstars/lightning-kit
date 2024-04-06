@@ -30,11 +30,23 @@ public:
     }
 
     template<typename T, typename... Args,
-        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr,
-        typename std::enable_if<std::is_base_of<Actor, T>::value>::type* = nullptr>
+        typename std::enable_if<!std::is_same<DPDKStream, T>::value>::type* = nullptr >
     std::shared_ptr<T> create_stream(Args... args)
     {
-        return std::make_shared<T>(select_runtime(Runtime::DPDK), args...);
+        auto stream(std::make_shared<T>(args...));
+        register_stream(stream);
+        return stream;
+    }
+
+    template<typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr >
+    std::shared_ptr<T> create_stream(Args... args)
+    {
+        register_runtime(Runtime::DPDK);
+
+        auto stream(std::make_shared<T>(std::dynamic_pointer_cast<DPDKRuntime>(select_runtime(Runtime::DPDK)), args...));
+        register_stream(stream);
+        return stream;
     }
 
     void start();
@@ -46,6 +58,8 @@ public:
 
 private:
     void register_actor(const std::string& id, const std::shared_ptr<Actor>& actor);
+    void register_stream(const std::shared_ptr<Stream>& stream);
+    void register_runtime(Runtime::Type type);
 
     std::shared_ptr<Runtime> select_runtime(Runtime::Type type);
 
