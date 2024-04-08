@@ -35,7 +35,7 @@ void DPDKStream::start()
 {
     int ret = 0;
 
-    constexpr uint32_t mtu = 9000;
+    constexpr uint32_t mtu = 8000;
 
     auto port_id = impl_->port_id;
 
@@ -183,23 +183,22 @@ void DPDKStream::stop()
 
 }
 
-void DPDKStream::put(rte_mbuf* v)
+bool DPDKStream::put(rte_mbuf** v, size_t count)
 {
-    auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
-    if (nb != 1) {
+    auto nb = rte_eth_tx_burst(impl_->port_id, 0, v, count);
+    if (nb != count) {
         throw std::runtime_error("rte_eth_tx_burst");
-    }
-}
-
-bool DPDKStream::get(rte_mbuf** vp)
-{
-    if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
-        return false;
     }
     return true;
 }
 
-bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, size_t length, uint8_t tcp_flags)
+size_t DPDKStream::get(rte_mbuf** vp, size_t max)
+{
+    return rte_eth_rx_burst(impl_->port_id, 0, vp, max);
+}
+
+bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
+
 {
     auto ack_mbuf = rte_pktmbuf_copy(recv_mbuf, rt->get_mempool(), 0, sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr));
 
@@ -216,9 +215,16 @@ bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, size_t length, uint
     ipv4->src_addr = ipv4->dst_addr;
     ipv4->dst_addr = tmp_ipv4;
 
-    auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    // rte_net_hdr_lens hdr_lens;
+    // auto ptype = rte_net_get_ptype(recv_mbuf, &hdr_lens, RTE_PTYPE_ALL_MASK);
+    // if ((ptype & RTE_PTYPE_L4_MASK) != RTE_PTYPE_L4_TCP) {
+    //     throw std::runtime_error("unexpected rte_net_get_ptype");
+    // }
+    // auto tcp_rev = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
+    // uint32_t ackn = rte_be_to_cpu_32(tcp_rev->sent_seq) + length + ((tcp_rev->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
 
-    auto ackn = rte_be_to_cpu_32(tcp->sent_seq) + length + ((tcp->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+    auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    uint32_t ackn = rte_be_to_cpu_32(tcp->sent_seq) + length + ((tcp->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
 
     auto tmp_port = tcp->src_port;
     tcp->src_port = tcp->dst_port;
@@ -237,7 +243,7 @@ bool DPDKStream::Impl::send_synack(rte_mbuf* recv_mbuf)
     return send_flag_packet(recv_mbuf, 1, RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG);
 }
 
-bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, size_t length)
+bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, uint32_t length)
 {
     return send_flag_packet(recv_mbuf, length, RTE_TCP_ACK_FLAG);
 }

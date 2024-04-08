@@ -5,8 +5,6 @@
 
 #include <signal.h>
 
-#include <rte_mbuf.h>
-
 #include "lng/lng.h"
 
 using namespace std::chrono_literals;
@@ -20,7 +18,7 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<rte_mbuf*>>& is, const std::shared_ptr<Queueable<rte_mbuf*>>& os)
+    Receiver(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<uint8_t*>>& is, const std::shared_ptr<Queueable<uint8_t*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -30,21 +28,21 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v[1];
-        if (size_t num = outer_stream_->get(v, 1)) {
-            std::cout << "received " << v[0]->pkt_len << " bytes" << std::endl;
+        uint8_t* v[1000];
+        if (size_t num = outer_stream_->get((uint8_t**)(v), 1000)) {
+            // std::cout << "received " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             inner_stream_->put(v, num);
         }
     }
 
 private:
-    std::shared_ptr<Queueable<rte_mbuf*>> inner_stream_;
-    std::shared_ptr<Queueable<rte_mbuf*>> outer_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> inner_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> outer_stream_;
 };
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<rte_mbuf*>>& is, const std::shared_ptr<Queueable<rte_mbuf*>>& os)
+    Sender(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<uint8_t*>>& is, const std::shared_ptr<Queueable<uint8_t*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -54,16 +52,16 @@ public:
 protected:
     virtual void main() override
     {
-        rte_mbuf* v[1];
-        if (size_t num = inner_stream_->get(v, 1)) {
-            std::cout << "send " << v[0]->pkt_len << " bytes" << std::endl;
+        uint8_t* v[1000];
+        if (size_t num = inner_stream_->get((uint8_t**)(v), 1000)) {
+            // std::cout << "send " << num << " " << ((float*)v[0]) << " packets" << std::endl;
             outer_stream_->put(v, num);
         }
     }
 
 private:
-    std::shared_ptr<Queueable<rte_mbuf*>> inner_stream_;
-    std::shared_ptr<Queueable<rte_mbuf*>> outer_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> inner_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> outer_stream_;
 };
 
 //                 +----------+                    +--------+
@@ -76,11 +74,15 @@ int main()
 
         System sys;
 
-        auto outer_stream(sys.create_stream<DPDKStream>(2));
-        auto inner_stream(sys.create_stream<MemoryStream<rte_mbuf*>>());
+        auto outer_stream(sys.create_stream<DOCAUDPStream>("17:00.1", "2a:00.0"));
+        auto inner_stream(sys.create_stream<MemoryStream<uint8_t*>>());
 
-        auto receiver(sys.create_actor<Receiver>("/receiver", 4, inner_stream, outer_stream));
-        auto sender(sys.create_actor<Sender>("/sender", 5, inner_stream, outer_stream));
+        auto receiver(sys.create_actor<Receiver>("/receiver", 4,
+            inner_stream,
+            outer_stream));
+        auto sender(sys.create_actor<Sender>("/sender", 5,
+            inner_stream,
+            outer_stream));
 
         sys.start();
 
