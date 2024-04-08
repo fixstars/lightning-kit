@@ -18,8 +18,8 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
-        : Actor(id)
+    Receiver(const std::string& id, int cpu_id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
+        : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
     {
@@ -42,8 +42,8 @@ private:
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
-        : Actor(id)
+    Sender(const std::string& id, int cpu_id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
+        : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
     {
@@ -77,10 +77,10 @@ int main()
         DOCAUDPStream outer_stream("17:00.1", "2a:00.0");
         MemoryStream<uint8_t*> inner_stream;
 
-        auto receiver(sys.create_actor<Receiver>("/receiver",
+        auto receiver(sys.create_actor<Receiver>("/receiver", 4,
             &inner_stream,
             &outer_stream));
-        auto sender(sys.create_actor<Sender>("/sender",
+        auto sender(sys.create_actor<Sender>("/sender", 5,
             &inner_stream,
             &outer_stream));
 

@@ -4,7 +4,7 @@
 #include <memory>
 #include <vector>
 
-#include "concurrentqueue/blockingconcurrentqueue.h"
+#include "concurrentqueue/concurrentqueue.h"
 
 struct rte_mbuf;
 struct rte_mempool;
@@ -32,7 +32,11 @@ template <typename T>
 class MemoryStream : public Stream<T> {
 
     struct Impl {
+#ifdef BLOCKINGQUEUE
+        moodycamel::BlockingConcurrentQueue<T> queue;
+#else
         moodycamel::ConcurrentQueue<T> queue;
+#endif
     };
 
 public:
@@ -62,9 +66,17 @@ class DPDKStream : public Stream<rte_mbuf*> {
     struct Impl {
         rte_mempool* mbuf_pool;
         uint16_t port_id;
+        uint16_t tcp_port;
+        bool send_ack(rte_mbuf* recv_mbuf, uint32_t length);
+        bool send_synack(rte_mbuf* tar);
+        void wait_for_3wayhandshake();
+        bool check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(uint16_t port_id);
         ~Impl();
+
+    private:
+        bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
     };
 
 public:
@@ -76,6 +88,15 @@ public:
     virtual bool put(rte_mbuf** v, size_t count);
 
     virtual size_t get(rte_mbuf** vp, size_t max);
+
+    bool send_ack(rte_mbuf* recv_mbuf, uint32_t length)
+    {
+        return impl_->send_ack(recv_mbuf, length);
+    }
+    bool check_target_packet(rte_mbuf* recv_mbuf)
+    {
+        return impl_->check_target_packet(recv_mbuf);
+    }
 
 private:
     std::shared_ptr<Impl> impl_;
@@ -183,6 +204,27 @@ private:
 };
 
 #endif
+
+struct Segment {
+    uint8_t* payload;
+    uint16_t length;
+};
+
+struct Payloads {
+    static constexpr size_t max_payloads = 10;
+    rte_mbuf* buf = nullptr;
+    uint8_t no_of_payload = 0;
+    Segment segments[max_payloads];
+    size_t dropped_bytes = 0;
+    void Clear();
+    uint32_t ExtractPayloads(rte_mbuf* mbuf);
+};
+
+struct Frame {
+    static constexpr size_t frame_size = 64 * 1024 * 1024;
+    size_t frame_id;
+    uint8_t body[frame_size];
+};
 
 } // lng
 

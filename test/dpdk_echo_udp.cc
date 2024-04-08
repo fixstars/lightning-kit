@@ -20,8 +20,8 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
-        : Actor(id)
+    Receiver(const std::string& id, int cpu_id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+        : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
     {
@@ -44,8 +44,8 @@ private:
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
-        : Actor(id)
+    Sender(const std::string& id, int cpu_id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+        : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
     {
@@ -79,10 +79,10 @@ int main()
         DPDKStream outer_stream(2);
         MemoryStream<rte_mbuf*> inner_stream;
 
-        auto receiver(sys.create_actor<Receiver>("/receiver",
+        auto receiver(sys.create_actor<Receiver>("/receiver", 4,
             &inner_stream,
             &outer_stream));
-        auto sender(sys.create_actor<Sender>("/sender",
+        auto sender(sys.create_actor<Sender>("/sender", 5,
             &inner_stream,
             &outer_stream));
 
