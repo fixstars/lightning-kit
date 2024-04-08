@@ -1,9 +1,11 @@
-#include "lng/receiver-actor.h"
-
 #include <rte_ether.h>
 #include <rte_ip.h>
 #include <rte_mbuf.h>
 #include <rte_tcp.h>
+
+#include "lng/receiver-actor.h"
+
+#include "log.h"
 
 namespace lng {
 
@@ -42,6 +44,13 @@ uint32_t Payloads::ExtractPayloads(rte_mbuf* mbuf)
     uint32_t payload_size = rte_be_to_cpu_16(ipv4->total_length) - sizeof(rte_ipv4_hdr) - sizeof(rte_tcp_hdr);
 
     return payload_size;
+}
+
+void Receiver::setup()
+{
+    log::debug("Receiver is waiting for 3-way handshake");
+    nic_stream_->wait_for_3wayhandshake();
+    log::debug("Receiver is awaked from 3-way handshake");
 }
 
 void Receiver::main()

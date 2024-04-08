@@ -107,9 +107,14 @@ public:
     {
         return impl_->send_ack(recv_mbuf, length);
     }
+
     bool check_target_packet(rte_mbuf* recv_mbuf)
     {
         return impl_->check_target_packet(recv_mbuf);
+    }
+
+    void wait_for_3wayhandshake() {
+        impl_->wait_for_3wayhandshake();
     }
 
 private:

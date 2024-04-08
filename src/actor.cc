@@ -87,10 +87,18 @@ void Actor::entry_point(Actor* obj)
                 obj->impl_->cvar.notify_all();
             }
 
+            if (from == State::Started && to == State::Running) {
+                obj->setup();
+            }
+
             if (to == State::Running) {
                 obj->main();
             } else if (to == State::Fin) {
                 return;
+            }
+
+            if (from == State::Stopped && to == State::Ready) {
+                obj->teardown();
             }
 
         } catch (const std::exception& e) {

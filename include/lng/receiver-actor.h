@@ -20,6 +20,7 @@ public:
     }
 
 protected:
+    virtual void setup() override;
     virtual void main() override;
 
 private:

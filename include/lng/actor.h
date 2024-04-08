@@ -69,6 +69,8 @@ public:
     void wait_until(State to);
 
 protected:
+    virtual void setup() {}
+    virtual void teardown() {}
     virtual void main() = 0;
 
 private:

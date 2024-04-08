@@ -154,8 +154,6 @@ void DPDKStream::start()
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
-
-    impl_->wait_for_3wayhandshake();
 }
 
 void DPDKStream::stop()
