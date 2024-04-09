@@ -23,6 +23,7 @@ namespace {
 Actor::Actor(const std::string& id, int cpu_id)
     : impl_(new Impl(this, id, cpu_id))
 {
+    impl_->th = std::move(std::thread(entry_point, this));
     log::debug("{} is initialized", impl_->id);
 }
 

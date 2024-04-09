@@ -43,7 +43,7 @@ private:
         int cpu_id;
 
         Impl(Actor* obj, const std::string& id, int cpu)
-            : th(entry_point, obj)
+            : th()
             , mutex()
             , cvar()
             , id(id)
