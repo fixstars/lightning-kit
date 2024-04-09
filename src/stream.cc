@@ -195,6 +195,11 @@ size_t DPDKStream::get(rte_mbuf** vp, size_t max)
     return rte_eth_rx_burst(impl_->port_id, 0, vp, max);
 }
 
+size_t DPDKStream::count()
+{
+    return rte_eth_rx_queue_count(impl_->port_id, 0);
+}
+
 bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
 
 {

@@ -139,7 +139,7 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 
 void FrameBuilder::main()
 {
-
+#if 0
     if (!next_frame_) {
         if (!ready_frame_stream_->get(&next_frame_, 1)) {
             return;
@@ -182,5 +182,44 @@ void FrameBuilder::main()
     }
     frame->frame_id = this->frame_id_++;
     vaild_frame_stream_->put(&frame, 1);
+#else
+    if (!next_frame_) {
+        if (!ready_frame_stream_->get(&next_frame_, 1)) {
+            return;
+        }
+    }
+
+    Frame* frame = next_frame_;
+   
+    // WIP/TODO: Make this loop transit-safe
+    Payloads* pays;
+    if (!vaild_payload_stream_->get(&pays, 1)) {
+        return;
+    }
+    
+    for (int seg = 0; seg < pays->no_of_payload; seg++) {
+        auto len = pays->segments[seg].length;
+        if (write_head_ + len < Frame::frame_size) {
+            lng_memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
+            write_head_ += len;
+        } else if (write_head_ < Frame::frame_size) {
+            size_t bytes_cur_frame = Frame::frame_size - write_head_;
+            size_t bytes_next_frame = len - bytes_cur_frame;
+            uint8_t* p = pays->segments[seg].payload;
+            lng_memcpy(frame->body + write_head_, p, bytes_cur_frame);
+            lng_memcpy(next_frame_->body, p + bytes_cur_frame, bytes_next_frame);
+            write_head_ = bytes_next_frame;
+
+            frame->frame_id = this->frame_id_++;
+            vaild_frame_stream_->put(&frame, 1);
+        } else {
+            lng_memcpy(next_frame_->body + write_head_, pays->segments[seg].payload, len);
+            write_head_ += len;
+        }
+    }
+    
+    ready_payload_stream_->put(&pays, 1);
+#endif
 }
-}
+
+} // lng

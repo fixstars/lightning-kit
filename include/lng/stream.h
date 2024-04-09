@@ -33,6 +33,7 @@ class Queueable {
 public:
     virtual bool put(T* v, size_t count) = 0;
     virtual size_t get(T* vp, size_t max) = 0;
+    virtual size_t count() = 0;
 };
 
 template <typename T>
@@ -63,6 +64,11 @@ public:
     virtual size_t get(T* vp, size_t max)
     {
         return impl_->queue.try_dequeue_bulk(vp, max);
+    }
+
+    virtual size_t count()
+    {
+        return impl_->queue.size_approx();
     }
 
 private:
@@ -102,6 +108,8 @@ public:
     virtual bool put(rte_mbuf** v, size_t count);
 
     virtual size_t get(rte_mbuf** vp, size_t max);
+
+    virtual size_t count();
 
     bool send_ack(rte_mbuf* recv_mbuf, uint32_t length)
     {
@@ -168,6 +176,8 @@ public:
     {
         return impl_->get(vp, max);
     }
+    
+    virtual size_t count();
 
 private:
     std::shared_ptr<Impl> impl_;
@@ -223,6 +233,8 @@ public:
     {
         return impl_->get(vp, max);
     }
+
+    virtual size_t count();
 
 private:
     std::shared_ptr<Impl> impl_;
