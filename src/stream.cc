@@ -2,6 +2,7 @@
 #include <rte_eal.h>
 #include <rte_ethdev.h>
 #include <rte_mbuf.h>
+#include <rte_net.h>
 #endif
 
 #include "lng/stream.h"
@@ -13,17 +14,17 @@ namespace lng {
 DPDKStream::Impl::Impl(uint16_t port_id)
     : port_id(port_id)
 {
-    constexpr uint32_t mtu = 9000;
+    constexpr uint32_t mtu = 8000;
 
     // Initializion the environment abstraction layer
-    std::vector<std::string> arguments = {"."};
-    std::vector<char *>args;
+    std::vector<std::string> arguments = { "." };
+    std::vector<char*> args;
     for (auto& a : arguments) {
         args.push_back(&a[0]);
     }
     args.push_back(nullptr);
 
-    int ret = rte_eal_init(args.size()-1, args.data());
+    int ret = rte_eal_init(args.size() - 1, args.data());
     if (ret < 0) {
         throw std::runtime_error("Cannot initialize DPDK");
     }
@@ -36,7 +37,7 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     mbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", n, cache_size, 0, data_room_size, rte_socket_id());
     if (mbuf_pool == nullptr) {
         throw std::runtime_error(fmt::format("Cannot create mbuf pool, n={}, cache_size={}, priv_size=0, data_room_size={}",
-                                     n, cache_size, data_room_size));
+            n, cache_size, data_room_size));
     }
 
     // Initializing all ports
@@ -154,9 +155,43 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
+
+    wait_for_3wayhandshake();
 }
 
-DPDKStream::Impl::~Impl() {
+void DPDKStream::Impl::wait_for_3wayhandshake()
+{
+
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
+            continue;
+        send_synack(v);
+
+        tcp_port = tcp->dst_port;
+
+        rte_pktmbuf_free(v);
+        break;
+    }
+
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
+            continue;
+        break;
+    }
+}
+
+DPDKStream::Impl::~Impl()
+{
     auto ret = rte_eth_dev_stop(port_id);
     if (ret < 0) {
         log::error("Failed to stop device: {}", strerror(-ret));
@@ -179,19 +214,95 @@ DPDKStream::Impl::~Impl() {
     rte_eal_cleanup();
 }
 
-void DPDKStream::put(rte_mbuf *v) {
-    auto nb = rte_eth_tx_burst(impl_->port_id, 0, &v, 1);
-    if (nb != 1) {
+bool DPDKStream::put(rte_mbuf** v, size_t count)
+{
+    auto nb = rte_eth_tx_burst(impl_->port_id, 0, v, count);
+    if (nb != count) {
         throw std::runtime_error("rte_eth_tx_burst");
     }
+    return true;
 }
 
-bool DPDKStream::get(rte_mbuf **vp) {
-        if (!rte_eth_rx_burst(impl_->port_id, 0, vp, 1)) {
-            return false;
-        }
-        return true;
-    }
+size_t DPDKStream::get(rte_mbuf** vp, size_t max)
+{
+    return rte_eth_rx_burst(impl_->port_id, 0, vp, max);
+}
 
+bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
+
+{
+    auto ack_mbuf = rte_pktmbuf_copy(recv_mbuf, mbuf_pool, 0, sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr));
+
+    auto* eth = rte_pktmbuf_mtod_offset(ack_mbuf, rte_ether_hdr*, 0);
+
+    rte_ether_addr tmp_eth;
+    rte_ether_addr_copy(&eth->dst_addr, &tmp_eth);
+    rte_ether_addr_copy(&eth->src_addr, &eth->dst_addr);
+    rte_ether_addr_copy(&tmp_eth, &eth->src_addr);
+
+    auto* ipv4 = rte_pktmbuf_mtod_offset(ack_mbuf, rte_ipv4_hdr*, sizeof(rte_ether_hdr));
+
+    auto tmp_ipv4 = ipv4->src_addr;
+    ipv4->src_addr = ipv4->dst_addr;
+    ipv4->dst_addr = tmp_ipv4;
+
+    // rte_net_hdr_lens hdr_lens;
+    // auto ptype = rte_net_get_ptype(recv_mbuf, &hdr_lens, RTE_PTYPE_ALL_MASK);
+    // if ((ptype & RTE_PTYPE_L4_MASK) != RTE_PTYPE_L4_TCP) {
+    //     throw std::runtime_error("unexpected rte_net_get_ptype");
+    // }
+    // auto tcp_rev = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
+    // uint32_t ackn = rte_be_to_cpu_32(tcp_rev->sent_seq) + length + ((tcp_rev->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+
+    auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    uint32_t ackn = rte_be_to_cpu_32(tcp->sent_seq) + length + ((tcp->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+
+    auto tmp_port = tcp->src_port;
+    tcp->src_port = tcp->dst_port;
+    tcp->dst_port = tmp_port;
+    tcp->sent_seq = tcp->recv_ack;
+    tcp->recv_ack = rte_cpu_to_be_32(ackn);
+    tcp->tcp_flags = tcp_flags;
+
+    auto num = rte_eth_tx_burst(port_id, 0, &ack_mbuf, 1);
+
+    return num == 1;
+}
+
+bool DPDKStream::Impl::send_synack(rte_mbuf* recv_mbuf)
+{
+    return send_flag_packet(recv_mbuf, 1, RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG);
+}
+
+bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, uint32_t length)
+{
+    return send_flag_packet(recv_mbuf, length, RTE_TCP_ACK_FLAG);
+}
+
+bool DPDKStream::Impl::check_target_packet(rte_mbuf* recv_mbuf)
+{
+    auto eh = rte_pktmbuf_mtod(recv_mbuf, rte_ether_hdr*);
+    if (rte_be_to_cpu_16(eh->ether_type) == RTE_ETHER_TYPE_ARP) {
+        // TODO reply arp
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    rte_net_hdr_lens hdr_lens;
+    auto packet_type = rte_net_get_ptype(recv_mbuf, &hdr_lens, RTE_PTYPE_ALL_MASK);
+    if (!RTE_ETH_IS_IPV4_HDR(packet_type) || ((packet_type & RTE_PTYPE_L4_MASK) != RTE_PTYPE_L4_TCP)) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    auto* tcp = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
+    if (tcp->dst_port != tcp_port) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    if (tcp->tcp_flags & RTE_TCP_SYN_FLAG) {
+        rte_pktmbuf_free(recv_mbuf);
+        return false;
+    }
+    return true;
+}
 
 } // lng

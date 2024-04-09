@@ -21,6 +21,9 @@ pkg_check_modules(LIBDOCAGPU doca-gpu)
 # CUDA
 find_package(CUDAToolkit)
 
+# AVX
+include(FindAVX.cmake)
+
 if(CUDAToolkit_FOUND)
     set(LNG_WITH_CUDA 1)
     add_compile_definitions(LNG_WITH_CUDA=1)
@@ -53,6 +56,7 @@ file(GENERATE OUTPUT ${PROJECT_BINARY_DIR}/VERSION CONTENT "${LNG_KIT_VERSION_S}
 #
 set(LNG_CORE_SRC
     src/actor.cc
+    src/receiver-actor.cc
     src/event.cc
     src/log.cc
     src/stream.cc
@@ -66,6 +70,8 @@ endif()
 if(LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/doca-common-util.cc
+        src/doca-common-util-internal.cc
+        src/doca-stream.cc
         src/doca-tcp-util.cc
         src/doca-udp-util.cc)
 endif()
@@ -73,7 +79,7 @@ add_library(lng-core ${LNG_CORE_SRC})
 
 set(LNG_CORE_INCLUDE_DIRECTORIES_PUBLIC ${PROJECT_SOURCE_DIR}/include)
 set(LNG_CORE_INCLUDE_DIRECTORIES_PRIVATE ${PROJECT_SOURCE_DIR}/src)
-set(LNG_CORE_COMPILE_OPTIONS_PUBLIC)
+set(LNG_CORE_COMPILE_OPTIONS_PUBLIC ${LATEST_AVX_FLAGS})
 set(LNG_CORE_COMPILE_OPTIONS_PRIVATE)
 set(LNG_CORE_LINK_LIBRARIES_PUBLIC Threads::Threads)
 set(LNG_CORE_LINK_LIBRARIES_PRIVATE)
@@ -114,14 +120,21 @@ target_link_libraries(test_basic lng-core)
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
     target_link_libraries(test_dpdk_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+    add_executable(dpdk_frame_builder_tcp test/dpdk_frame_builder_tcp.cc)
+    target_link_libraries(dpdk_frame_builder_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
-if(LNG_WITH_NVIDIA)
-    add_executable(test_tcp test/test_tcp.cc)
-    target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
-    add_executable(test_udp test/test_udp.cc)
-    target_link_libraries(test_udp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+if(LNG_WITH_DOCA)
+    add_executable(test_doca_echo_udp test/doca_echo_udp.cc)
+    target_link_libraries(test_doca_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+    add_executable(test_doca_build_frame_tcp test/doca_build_frame_tcp.cc)
+    target_link_libraries(test_doca_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
+
+# if(LNG_WITH_NVIDIA)
+#     add_executable(test_tcp test/test_tcp.cc)
+#     target_link_libraries(test_tcp lng-core ${LIBDOCAGPU_STATIC_LDFLAGS})
+# endif()
 
 #
 # Install

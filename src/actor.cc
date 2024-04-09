@@ -5,47 +5,60 @@
 namespace lng {
 
 namespace {
-std::string to_string(const Actor::State state) {
-    const char *table[] = {
-        "Init",
-        "Ready",
-        "Started",
-        "Running",
-        "Stopped",
-        "Terminated",
-        "Fin"
-    };
-    return table[static_cast<int>(state)];
-}
+    std::string to_string(const Actor::State state)
+    {
+        const char* table[] = {
+            "Init",
+            "Ready",
+            "Started",
+            "Running",
+            "Stopped",
+            "Terminated",
+            "Fin"
+        };
+        return table[static_cast<int>(state)];
+    }
 } // anonymous
 
-Actor::Actor(const std::string& id)
-    : impl_(new Impl(this, id))
+Actor::Actor(const std::string& id, int cpu_id)
+    : impl_(new Impl(this, id, cpu_id))
 {
     log::debug("{} is initialized", impl_->id);
 }
 
-void Actor::start() {
+void Actor::start()
+{
     transit(State::Ready, State::Started);
 }
 
-void Actor::stop() {
+void Actor::stop()
+{
     transit(State::Running, State::Stopped);
 }
 
-void Actor::terminate() {
+void Actor::terminate()
+{
     transit(State::Ready, State::Terminated);
 }
 
-void Actor::wait_until(State to) {
+void Actor::wait_until(State to)
+{
     std::unique_lock lock(impl_->mutex);
     log::debug("{} wait until : {} -> {}", impl_->id, to_string(impl_->state), to_string(to));
     impl_->cvar.wait(lock, [&] { return impl_->state == to; });
 }
 
-
-void Actor::entry_point(Actor *obj)
+static inline void set_affinity(int cpu_id)
 {
+    cpu_set_t my_set;
+    CPU_ZERO(&my_set);
+    CPU_SET(cpu_id, &my_set);
+    sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
+}
+
+void Actor::entry_point(Actor* obj)
+{
+    set_affinity(obj->impl_->cpu_id);
     while (true) {
         try {
 
@@ -53,11 +66,7 @@ void Actor::entry_point(Actor *obj)
             State to;
             {
                 std::unique_lock lock(obj->impl_->mutex);
-                obj->impl_->cvar.wait(lock, [&] { return obj->impl_->state == State::Init |
-                                                         obj->impl_->state == State::Running |
-                                                         obj->impl_->state == State::Started |
-                                                         obj->impl_->state == State::Stopped |
-                                                         obj->impl_->state == State::Terminated; });
+                obj->impl_->cvar.wait(lock, [&] { return obj->impl_->state == State::Init | obj->impl_->state == State::Running | obj->impl_->state == State::Started | obj->impl_->state == State::Stopped | obj->impl_->state == State::Terminated; });
                 from = obj->impl_->state;
                 if (from == State::Init) {
                     to = State::Ready;
