@@ -126,7 +126,9 @@ if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
 
     add_executable(dpdk_frame_builder_tcp test/dpdk_frame_builder_tcp.cc)
     target_link_libraries(dpdk_frame_builder_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+endif()
 
+if(LNG_WITH_DOCA)
     add_executable(test_doca_echo_udp test/doca_echo_udp.cc)
     target_link_libraries(test_doca_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 
