@@ -7,6 +7,8 @@
 
 #include <vector>
 
+#include <iostream>
+
 DOCA_LOG_REGISTER(DOCA2CU);
 
 #define ACK_MASK (0x00 | TCP_FLAG_ACK)
@@ -631,8 +633,12 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
 
     streams.resize(2);
 
-    cudaStreamCreate(&streams[0]);
-    cudaStreamCreate(&streams[1]);
+    int leastPriority;
+    int greatestPriority;
+    cudaDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority);
+    std::cout << leastPriority << " " << greatestPriority << " greatestPriority" << std::endl;
+    cudaStreamCreateWithPriority(&streams[0], cudaStreamNonBlocking, greatestPriority);
+    cudaStreamCreateWithPriority(&streams[1], cudaStreamNonBlocking, leastPriority);
     // cudaStreamCreate(&streams[2]);
 }
 

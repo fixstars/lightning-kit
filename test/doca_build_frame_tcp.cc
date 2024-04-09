@@ -74,7 +74,7 @@ int main()
 
         System sys;
 
-        DOCATCPStream outer_stream("a1:00.1", "81:00.0");
+        DOCATCPStream outer_stream("a1:00.0", "81:00.0");
         MemoryStream<uint8_t*> inner_stream;
 
         auto receiver(sys.create_actor<Receiver>("/receiver", 4,
