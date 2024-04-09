@@ -16,6 +16,7 @@ public:
         , nic_stream_(dpdk_st)
         , vaild_payload_stream_(valid)
         , ready_payload_stream_(ready)
+        , payloads_(nullptr)
     {
     }
 
@@ -27,6 +28,8 @@ private:
     std::shared_ptr<DPDKStream> nic_stream_;
     std::shared_ptr<Queueable<Payloads*>> vaild_payload_stream_;
     std::shared_ptr<Queueable<Payloads*>> ready_payload_stream_;
+
+    Payloads *payloads_;
 };
 
 class FrameBuilder : public Actor {

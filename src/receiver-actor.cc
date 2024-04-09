@@ -55,31 +55,30 @@ void Receiver::setup()
 
 void Receiver::main()
 {
-    Payloads* pays;
-    if (!ready_payload_stream_->get(&pays, 1)) {
-        return;
-    } else {
-        pays->Clear();
-    }
-
-    while (true) {
-        rte_mbuf* v;
-        if (nic_stream_->get(&v, 1)) {
-            // std::cout << "received " << v->pkt_len << " bytes" << std::endl;
-            if (!nic_stream_->check_target_packet(v)) {
-                continue;
-            }
-
-            // TODO detect FIN and quit
-
-            auto len = pays->ExtractPayloads(v);
-
-            nic_stream_->send_ack(v, len);
-
-            vaild_payload_stream_->put(&pays, 1);
-            break;
+    if (!payloads_) {
+        if (!ready_payload_stream_->get(&payloads_, 1)) {
+            return;
         }
+        payloads_->Clear();
     }
+
+    rte_mbuf* v;
+    if (!nic_stream_->get(&v, 1)) {
+        return;
+    }
+
+    if (!nic_stream_->check_target_packet(v)) {
+        return;
+    }
+
+    // TODO detect FIN and quit
+    auto len = payloads_->ExtractPayloads(v);
+
+    nic_stream_->send_ack(v, len);
+
+    vaild_payload_stream_->put(&payloads_, 1);
+
+    payloads_ = nullptr;
 }
 
 #ifdef __AVX512F__
@@ -155,6 +154,7 @@ void FrameBuilder::main()
 
     bool complete = false;
 
+    // WIP/TODO: Make this loop transit-safe
     while (!complete) {
         Payloads* pays;
         if (vaild_payload_stream_->get(&pays, 1)) {
