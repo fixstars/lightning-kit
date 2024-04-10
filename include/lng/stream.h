@@ -241,24 +241,39 @@ private:
 };
 
 #endif
-
+#if 0
 struct Segment {
     uint8_t* payload;
     uint16_t length;
 };
 
-struct Payloads {
-    static constexpr size_t max_payloads = 10;
+struct Payload {
+    static constexpr size_t max_Payload = 10;
     rte_mbuf* buf = nullptr;
-    uint8_t no_of_payload = 0;
-    Segment segments[max_payloads];
+    uint8_t segments_num = 0;
+    Segment segments[max_Payload];
     size_t dropped_bytes = 0;
     void Clear();
-    uint32_t ExtractPayloads(rte_mbuf* mbuf);
+    uint32_t ExtractPayload(rte_mbuf* mbuf);
+};
+#else
+struct Segment {
+    uint8_t* addr;
+    uint16_t size;
 };
 
+struct Payload {
+    static constexpr size_t segments_max = 10;
+    rte_mbuf* buf = nullptr;
+    uint8_t segments_num = 0;
+    Segment segments[segments_max];
+    size_t dropped_bytes = 0;
+    void Clear();
+    uint32_t ExtractPayload(rte_mbuf* mbuf);
+};
+#endif
 struct Frame {
-    static constexpr size_t frame_size = 64 * 1024 * 1024;
+    static constexpr size_t frame_size = 256;//64 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };

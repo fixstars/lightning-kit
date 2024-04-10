@@ -9,16 +9,16 @@
 
 namespace lng {
 
-void Payloads::Clear()
+void Payload::Clear()
 {
     if (this->buf) {
         rte_pktmbuf_free(this->buf);
     }
     this->buf = nullptr;
-    this->no_of_payload = 0;
+    this->segments_num = 0;
 }
 
-uint32_t Payloads::ExtractPayloads(rte_mbuf* mbuf)
+uint32_t Payload::ExtractPayload(rte_mbuf* mbuf)
 {
     this->buf = mbuf;
 
@@ -26,15 +26,15 @@ uint32_t Payloads::ExtractPayloads(rte_mbuf* mbuf)
     int header_size = sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr);
 
     while (seg) {
-        if (this->no_of_payload >= max_payloads) {
+        if (this->segments_num >= segments_max) {
             throw std::runtime_error("# of payload overflow");
         }
 
         uint16_t seg_len = rte_pktmbuf_data_len(seg) - header_size;
         if (seg_len > 0) {
-            this->segments[this->no_of_payload].payload = rte_pktmbuf_mtod_offset(seg, uint8_t*, header_size);
-            this->segments[this->no_of_payload].length = rte_pktmbuf_data_len(seg) - header_size;
-            this->no_of_payload++;
+            this->segments[this->segments_num].addr = rte_pktmbuf_mtod_offset(seg, uint8_t*, header_size);
+            this->segments[this->segments_num].size = rte_pktmbuf_data_len(seg) - header_size;
+            this->segments_num++;
         }
         seg = seg->next;
 
@@ -54,12 +54,41 @@ void Receiver::setup()
 }
 
 void Receiver::main()
+#if 0
 {
-    if (!payloads_) {
-        if (!ready_payload_stream_->get(&payloads_, 1)) {
+    Payload* pays;
+    if (!ready_payload_stream_->get(&pays, 1)) {
+        return;
+    } else {
+        pays->Clear();
+    }
+
+    while (true) {
+        rte_mbuf* v;
+        if (nic_stream_->get(&v, 1)) {
+            // std::cout << "received " << v->pkt_len << " bytes" << std::endl;
+            if (!nic_stream_->check_target_packet(v)) {
+                continue;
+            }
+
+            // TODO detect FIN and quit
+
+            auto len = pays->ExtractPayload(v);
+
+            nic_stream_->send_ack(v, len);
+
+            valid_payload_stream_->put(&pays, 1);
+            break;
+        }
+    }
+}
+#else
+{
+    if (!payload_) {
+        if (!ready_payload_stream_->get(&payload_, 1)) {
             return;
         }
-        payloads_->Clear();
+        payload_->Clear();
     }
 
     rte_mbuf* v;
@@ -72,14 +101,17 @@ void Receiver::main()
     }
 
     // TODO detect FIN and quit
-    auto len = payloads_->ExtractPayloads(v);
+    auto len = payload_->ExtractPayload(v);
 
     nic_stream_->send_ack(v, len);
 
-    vaild_payload_stream_->put(&payloads_, 1);
+    valid_payload_stream_->put(&payload_, 1);
+    log::trace("r1");
 
-    payloads_ = nullptr;
+    payload_ = nullptr;
 }
+#endif
+
 
 #ifdef __AVX512F__
 
@@ -156,9 +188,9 @@ void FrameBuilder::main()
 
     // WIP/TODO: Make this loop transit-safe
     while (!complete) {
-        Payloads* pays;
-        if (vaild_payload_stream_->get(&pays, 1)) {
-            for (int seg = 0; seg < pays->no_of_payload; seg++) {
+        Payload* pays;
+        if (valid_payload_stream_->get(&pays, 1)) {
+            for (int seg = 0; seg < pays->segments_num; seg++) {
                 auto len = pays->segments[seg].length;
                 if (write_head_ + len < Frame::frame_size) {
                     lng_memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
@@ -181,44 +213,55 @@ void FrameBuilder::main()
         }
     }
     frame->frame_id = this->frame_id_++;
-    vaild_frame_stream_->put(&frame, 1);
+    valid_frame_stream_->put(&frame, 1);
 #else
-    if (!next_frame_) {
-        if (!ready_frame_stream_->get(&next_frame_, 1)) {
+    if (!frame_) {
+        if (!ready_frame_stream_->get(&frame_, 1)) {
             return;
         }
     }
 
-    Frame* frame = next_frame_;
-   
-    // WIP/TODO: Make this loop transit-safe
-    Payloads* pays;
-    if (!vaild_payload_stream_->get(&pays, 1)) {
-        return;
+    if (!payload_) {
+        if (!valid_payload_stream_->get(&payload_, 1)) {
+            return;
+        }
+        log::trace("0");
     }
-    
-    for (int seg = 0; seg < pays->no_of_payload; seg++) {
-        auto len = pays->segments[seg].length;
-        if (write_head_ + len < Frame::frame_size) {
-            lng_memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
-            write_head_ += len;
-        } else if (write_head_ < Frame::frame_size) {
-            size_t bytes_cur_frame = Frame::frame_size - write_head_;
-            size_t bytes_next_frame = len - bytes_cur_frame;
-            uint8_t* p = pays->segments[seg].payload;
-            lng_memcpy(frame->body + write_head_, p, bytes_cur_frame);
-            lng_memcpy(next_frame_->body, p + bytes_cur_frame, bytes_next_frame);
-            write_head_ = bytes_next_frame;
 
-            frame->frame_id = this->frame_id_++;
-            vaild_frame_stream_->put(&frame, 1);
+    int seg;
+    for (seg = payload_segment_id_; seg < payload_->segments_num; seg++) {
+        auto segment_size = payload_->segments[seg].size - payload_segment_read_offset_;
+        if (frame_write_offset_ + segment_size < Frame::frame_size) {
+            log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
+            payload_segment_read_offset_ = 0;
+            frame_write_offset_ += segment_size;
+        } else if (frame_write_offset_ < Frame::frame_size) {
+            size_t copy_size = Frame::frame_size - frame_write_offset_;
+            log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, copy_size);
+            payload_segment_id_ = seg;
+            payload_segment_read_offset_ = segment_size - copy_size;
+            frame_->frame_id = this->frame_id_++;
+            valid_frame_stream_->put(&frame_, 1);
+            frame_ = nullptr;
+            frame_write_offset_ = 0;
+            break;
         } else {
-            lng_memcpy(next_frame_->body + write_head_, pays->segments[seg].payload, len);
-            write_head_ += len;
+            log::trace("3:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
+            payload_segment_read_offset_ = 0;
+            frame_write_offset_ += segment_size;
         }
     }
     
-    ready_payload_stream_->put(&pays, 1);
+    if (seg == payload_->segments_num && payload_segment_read_offset_ == 0) {
+        log::trace("4");
+        ready_payload_stream_->put(&payload_, 1);
+        payload_ = nullptr;
+        payload_segment_id_ = 0;
+        payload_segment_read_offset_ = 0;
+    }
 #endif
 }
 

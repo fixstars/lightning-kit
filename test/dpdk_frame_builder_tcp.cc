@@ -69,13 +69,13 @@ int main()
         auto dpdk_stream = sys.create_stream<DPDKStream>(3);
         auto valid_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
         auto ready_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
-        auto valid_payload_stream = sys.create_stream<MemoryStream<Payloads*>>();
-        auto ready_payload_stream = sys.create_stream<MemoryStream<Payloads*>>();
+        auto valid_payload_stream = sys.create_stream<MemoryStream<Payload*>>();
+        auto ready_payload_stream = sys.create_stream<MemoryStream<Payload*>>();
 
         const int num_pays = 1024;
-        std::unique_ptr<Payloads> pays[num_pays];
+        std::unique_ptr<Payload> pays[num_pays];
         for (int i = 0; i < num_pays; ++i) {
-            pays[i].reset(new Payloads);
+            pays[i].reset(new Payload);
             auto p = pays[i].get();
             ready_payload_stream->put(&p, 1);
         }
