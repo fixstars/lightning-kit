@@ -14,6 +14,7 @@ namespace lng {
 
 void DPDKStream::Impl::wait_for_3wayhandshake()
 {
+    // Wait SYN, send SYN-ACK
     while (true) {
         rte_mbuf* v;
         if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
@@ -25,6 +26,21 @@ void DPDKStream::Impl::wait_for_3wayhandshake()
         send_synack(v);
 
         tcp_port = tcp->dst_port;
+
+        rte_pktmbuf_free(v);
+        break;
+    }
+    
+    // Wait ACK
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
+            continue;
 
         rte_pktmbuf_free(v);
         break;

@@ -54,35 +54,6 @@ void Receiver::setup()
 }
 
 void Receiver::main()
-#if 0
-{
-    Payload* pays;
-    if (!ready_payload_stream_->get(&pays, 1)) {
-        return;
-    } else {
-        pays->Clear();
-    }
-
-    while (true) {
-        rte_mbuf* v;
-        if (nic_stream_->get(&v, 1)) {
-            // std::cout << "received " << v->pkt_len << " bytes" << std::endl;
-            if (!nic_stream_->check_target_packet(v)) {
-                continue;
-            }
-
-            // TODO detect FIN and quit
-
-            auto len = pays->ExtractPayload(v);
-
-            nic_stream_->send_ack(v, len);
-
-            valid_payload_stream_->put(&pays, 1);
-            break;
-        }
-    }
-}
-#else
 {
     if (!payload_) {
         if (!ready_payload_stream_->get(&payload_, 1)) {
@@ -106,12 +77,9 @@ void Receiver::main()
     nic_stream_->send_ack(v, len);
 
     valid_payload_stream_->put(&payload_, 1);
-    log::trace("r1");
 
     payload_ = nullptr;
 }
-#endif
-
 
 #ifdef __AVX512F__
 
@@ -171,50 +139,6 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 
 void FrameBuilder::main()
 {
-#if 0
-    if (!next_frame_) {
-        if (!ready_frame_stream_->get(&next_frame_, 1)) {
-            return;
-        }
-    }
-
-    Frame* frame = next_frame_;
-
-    if (!ready_frame_stream_->get(&next_frame_, 1)) {
-        return;
-    }
-
-    bool complete = false;
-
-    // WIP/TODO: Make this loop transit-safe
-    while (!complete) {
-        Payload* pays;
-        if (valid_payload_stream_->get(&pays, 1)) {
-            for (int seg = 0; seg < pays->segments_num; seg++) {
-                auto len = pays->segments[seg].length;
-                if (write_head_ + len < Frame::frame_size) {
-                    lng_memcpy(frame->body + write_head_, pays->segments[seg].payload, len);
-                    write_head_ += len;
-                } else if (write_head_ < Frame::frame_size) {
-                    size_t bytes_cur_frame = Frame::frame_size - write_head_;
-                    size_t bytes_next_frame = len - bytes_cur_frame;
-                    uint8_t* p = pays->segments[seg].payload;
-                    lng_memcpy(frame->body + write_head_, p, bytes_cur_frame);
-                    lng_memcpy(next_frame_->body, p + bytes_cur_frame, bytes_next_frame);
-                    write_head_ = bytes_next_frame;
-
-                    complete = true;
-                } else {
-                    lng_memcpy(next_frame_->body + write_head_, pays->segments[seg].payload, len);
-                    write_head_ += len;
-                }
-            }
-            ready_payload_stream_->put(&pays, 1);
-        }
-    }
-    frame->frame_id = this->frame_id_++;
-    valid_frame_stream_->put(&frame, 1);
-#else
     if (!frame_) {
         if (!ready_frame_stream_->get(&frame_, 1)) {
             return;
@@ -225,44 +149,58 @@ void FrameBuilder::main()
         if (!valid_payload_stream_->get(&payload_, 1)) {
             return;
         }
-        log::trace("0");
     }
 
     int seg;
     for (seg = payload_segment_id_; seg < payload_->segments_num; seg++) {
         auto segment_size = payload_->segments[seg].size - payload_segment_read_offset_;
-        if (frame_write_offset_ + segment_size < Frame::frame_size) {
-            log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
-            lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
-            payload_segment_read_offset_ = 0;
-            frame_write_offset_ += segment_size;
-        } else if (frame_write_offset_ < Frame::frame_size) {
+        if (frame_write_offset_ + segment_size > Frame::frame_size) {
+            // The payload has to be split into two frames
             size_t copy_size = Frame::frame_size - frame_write_offset_;
-            log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, copy_size);
+            
+            // Store payload segment id and read offset for the next frame
             payload_segment_id_ = seg;
             payload_segment_read_offset_ = segment_size - copy_size;
+            
+            // Frame is pushed to the stream
+            frame_->frame_id = this->frame_id_++;
+            valid_frame_stream_->put(&frame_, 1);
+            frame_ = nullptr;
+            frame_write_offset_ = 0;
+            break;
+        } else if (frame_write_offset_ + segment_size == Frame::frame_size) {
+            // The payload can fit into the frame exactly
+            log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
+            
+            // Payload segment id and read offset should be point to the next segment because the payload is fully copied
+            payload_segment_id_ = seg + 1;
+            payload_segment_read_offset_ = 0;
+            
+            // Frame is pushed to the stream
             frame_->frame_id = this->frame_id_++;
             valid_frame_stream_->put(&frame_, 1);
             frame_ = nullptr;
             frame_write_offset_ = 0;
             break;
         } else {
+            // The payload can fit into the frame with some space left
             log::trace("3:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
             payload_segment_read_offset_ = 0;
             frame_write_offset_ += segment_size;
         }
     }
-    
+
+    // Release payload if it is fully copied
     if (seg == payload_->segments_num && payload_segment_read_offset_ == 0) {
-        log::trace("4");
         ready_payload_stream_->put(&payload_, 1);
         payload_ = nullptr;
         payload_segment_id_ = 0;
         payload_segment_read_offset_ = 0;
     }
-#endif
 }
 
 } // lng
