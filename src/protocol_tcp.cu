@@ -233,9 +233,16 @@ __global__ void cuda_kernel_receive_tcp(
 
     __syncthreads();
 
+    size_t heart_beat = 0;
+
     if (blockIdx.x == 0) {
 
         while (!(*is_fin)) {
+
+            if (threadIdx.x == 0 && (heart_beat % ((size_t)1500 * 128) == 0)) {
+                printf("heartbeat recv\n");
+            }
+            heart_beat++;
 
             ret = doca_gpu_dev_eth_rxq_receive_block(rxq, max_pkts, timeout_ns, &rx_pkt_num, &rx_buf_idx);
             /* If any thread returns receive error, the whole execution stops */
@@ -441,9 +448,17 @@ __global__ void cuda_kernel_makeframe(
     enum doca_gpu_semaphore_status status;
     __shared__ enum doca_gpu_semaphore_status status_frame;
 
+    size_t heart_beat = 0;
+
     while ((!quit) && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
 
+        if (threadIdx.x == 0 && (heart_beat % ((size_t)100) == 0)) {
+            printf("heartbeat frame %d\n", threadIdx.x);
+        }
+        heart_beat++;
+
         while (!packet_reached) {
+
             ret = doca_gpu_dev_semaphore_get_status(sem_recvinfo, sem_recvinfo_idx, &status);
             if (ret != DOCA_SUCCESS) {
                 printf("TCP semaphore error");
@@ -476,7 +491,6 @@ __global__ void cuda_kernel_makeframe(
                 packet_reached = true;
                 packet_reached_thidx = threadIdx.x + 1;
 
-                sem_recvinfo_idx = (sem_recvinfo_idx + blockDim.x) % sem_num;
             } else {
                 rx_pkt_num = 0;
                 packet_reached_thidx = 0;
@@ -496,7 +510,7 @@ __global__ void cuda_kernel_makeframe(
             if (status_frame == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
                 printf("%d %lld set buf\n", sem_frame_idx, frame_head);
                 cur_tar_buf = tar_buf + sem_frame_idx * frame_size;
-                cudaMemcpyAsync(cur_tar_buf, tmp_buf, frame_head, cudaMemcpyDeviceToDevice);
+                // cudaMemcpyAsync(cur_tar_buf, tmp_buf, frame_head, cudaMemcpyDeviceToDevice);
             }
         }
 
@@ -533,8 +547,14 @@ __global__ void cuda_kernel_makeframe(
                     uint8_t* data_head = cur_tar_buf + cur_head;
                     cudaMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
                     cudaMemcpyAsync(tmp_buf, payload + write_byte, total_payload_size - write_byte, cudaMemcpyDeviceToDevice);
+                    // if (write_byte + total_payload_size - write_byte > (size_t)2 * (size_t)1024 * 1024 * 1024) {
+                    //     printf("kokokoko\n");
+                    // }
                 } else {
-                    cudaMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
+                    // cudaMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
+                    // if (cur_head - frame_size + total_payload_size > (size_t)2 * (size_t)1024 * 1024 * 1024) {
+                    //     printf("koko\n");
+                    // }
                 }
             }
         }
@@ -551,6 +571,8 @@ __global__ void cuda_kernel_makeframe(
             packet_reached_thidx_share[0] = warpMax(local_max);
         }
         __syncthreads();
+
+        sem_recvinfo_idx = (sem_recvinfo_idx + packet_reached_thidx_share[0]) % sem_num;
 
         // for (int th_num = (blockDim.x + warpSize - 1) / warpSize; th_num > 1; th_num = (th_num + warpSize - 1) / warpSize) {
         //     if (threadIdx.x < warpSize * ((th_num + warpSize - 1) / warpSize)) {
@@ -654,6 +676,7 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     std::vector<cudaStream_t>& streams)
 {
 
+    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
     cudaMemset(is_fin, 0, sizeof(int));
 
     cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS>>>(
@@ -663,6 +686,8 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         tx_buf_arr->buf_arr_gpu);
 
     cudaDeviceSynchronize();
+
+    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
 
     cuda_kernel_receive_tcp<<<1, 32, 0, streams[0]>>>(
         rxq->eth_rxq_gpu,
