@@ -148,6 +148,12 @@ size_t DOCAUDPStream::Impl::get(uint8_t** vp, size_t max)
     return ret;
 }
 
+size_t DOCAUDPStream::count()
+{
+    // TBD
+    return 0;
+}
+
 DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     : sem_fr_idx(0)
 {
@@ -256,6 +262,12 @@ size_t DOCATCPStream::Impl::get(uint8_t** vp, size_t max)
     //     printf("sem_fr_idx %d\n", sem_fr_idx);
 
     return ret;
+}
+
+size_t DOCATCPStream::count()
+{
+    // TBD
+    return 0;
 }
 
 } // lng

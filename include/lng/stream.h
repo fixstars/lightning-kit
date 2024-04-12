@@ -17,19 +17,27 @@ struct doca_flow_pipe_entry;
 
 namespace lng {
 
+class DPDKRuntime;
 struct rx_queue;
 struct tx_queue;
 struct semaphore;
 
-template <typename T>
 class Stream {
 public:
-    virtual bool put(T* v, size_t count) = 0;
-    virtual size_t get(T* vp, size_t max) = 0;
+    virtual void start() = 0;
+    virtual void stop() = 0;
 };
 
 template <typename T>
-class MemoryStream : public Stream<T> {
+class Queueable {
+public:
+    virtual bool put(T* v, size_t count) = 0;
+    virtual size_t get(T* vp, size_t max) = 0;
+    virtual size_t count() = 0;
+};
+
+template <typename T>
+class MemoryStream : public Stream, public Queueable<T> {
 
     struct Impl {
 #ifdef BLOCKINGQUEUE
@@ -45,6 +53,9 @@ public:
     {
     }
 
+    virtual void start() {}
+    virtual void stop() {}
+
     virtual bool put(T* v, size_t count)
     {
         return impl_->queue.enqueue_bulk(v, count);
@@ -55,16 +66,21 @@ public:
         return impl_->queue.try_dequeue_bulk(vp, max);
     }
 
+    virtual size_t count()
+    {
+        return impl_->queue.size_approx();
+    }
+
 private:
     std::shared_ptr<Impl> impl_;
 };
 
 #if defined(LNG_WITH_DOCA) || defined(LNG_WITH_DPDK)
 
-class DPDKStream : public Stream<rte_mbuf*> {
+class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
 
     struct Impl {
-        rte_mempool* mbuf_pool;
+        std::shared_ptr<DPDKRuntime> rt;
         uint16_t port_id;
         uint16_t tcp_port;
         bool send_ack(rte_mbuf* recv_mbuf, uint32_t length);
@@ -72,30 +88,41 @@ class DPDKStream : public Stream<rte_mbuf*> {
         void wait_for_3wayhandshake();
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
-        Impl(uint16_t port_id);
-        ~Impl();
+        Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
+            : rt(rt), port_id(port_id)
+        {}
 
     private:
         bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
     };
 
 public:
-    DPDKStream(uint16_t port_id)
-        : impl_(new Impl(port_id))
+    DPDKStream(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
     {
     }
+
+    virtual void start();
+    virtual void stop();
 
     virtual bool put(rte_mbuf** v, size_t count);
 
     virtual size_t get(rte_mbuf** vp, size_t max);
 
+    virtual size_t count();
+
     bool send_ack(rte_mbuf* recv_mbuf, uint32_t length)
     {
         return impl_->send_ack(recv_mbuf, length);
     }
+
     bool check_target_packet(rte_mbuf* recv_mbuf)
     {
         return impl_->check_target_packet(recv_mbuf);
+    }
+
+    void wait_for_3wayhandshake() {
+        impl_->wait_for_3wayhandshake();
     }
 
 private:
@@ -106,7 +133,7 @@ private:
 
 #if defined(LNG_WITH_DOCA)
 
-class DOCAUDPStream : public Stream<uint8_t*> {
+class DOCAUDPStream : public Stream, public Queueable<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -137,6 +164,9 @@ public:
     {
     }
 
+    virtual void start() { /*TBD*/ }
+    virtual void stop() { /*TBD*/ }
+
     virtual bool put(uint8_t** v, size_t count)
     {
         return impl_->put(v, count);
@@ -146,12 +176,14 @@ public:
     {
         return impl_->get(vp, max);
     }
+    
+    virtual size_t count();
 
 private:
     std::shared_ptr<Impl> impl_;
 };
 
-class DOCATCPStream : public Stream<uint8_t*> {
+class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -189,6 +221,9 @@ public:
     {
     }
 
+    virtual void start() { /*TBD*/ }
+    virtual void stop() { /*TBD*/ }
+
     virtual bool put(uint8_t** v, size_t count)
     {
         return impl_->put(v, count);
@@ -199,29 +234,46 @@ public:
         return impl_->get(vp, max);
     }
 
+    virtual size_t count();
+
 private:
     std::shared_ptr<Impl> impl_;
 };
 
 #endif
-
+#if 0
 struct Segment {
     uint8_t* payload;
     uint16_t length;
 };
 
-struct Payloads {
-    static constexpr size_t max_payloads = 10;
+struct Payload {
+    static constexpr size_t max_Payload = 10;
     rte_mbuf* buf = nullptr;
-    uint8_t no_of_payload = 0;
-    Segment segments[max_payloads];
+    uint8_t segments_num = 0;
+    Segment segments[max_Payload];
     size_t dropped_bytes = 0;
     void Clear();
-    uint32_t ExtractPayloads(rte_mbuf* mbuf);
+    uint32_t ExtractPayload(rte_mbuf* mbuf);
+};
+#else
+struct Segment {
+    uint8_t* addr;
+    uint16_t size;
 };
 
+struct Payload {
+    static constexpr size_t segments_max = 10;
+    rte_mbuf* buf = nullptr;
+    uint8_t segments_num = 0;
+    Segment segments[segments_max];
+    size_t dropped_bytes = 0;
+    void Clear();
+    uint32_t ExtractPayload(rte_mbuf* mbuf);
+};
+#endif
 struct Frame {
-    static constexpr size_t frame_size = 64 * 1024 * 1024;
+    static constexpr size_t frame_size = 256;//64 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };

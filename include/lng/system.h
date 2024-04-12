@@ -6,63 +6,64 @@
 #include <unordered_map>
 
 #include "lng/actor.h"
+#include "lng/runtime.h"
+#include "lng/stream.h"
 
 namespace lng {
 
 class System {
+
+    struct Impl;
+
 public:
     System();
+    System(const System&) = delete;
+    System(const System&&) = delete;
 
     template <typename T, typename... Args,
         typename std::enable_if<std::is_base_of<Actor, T>::value>::type* = nullptr>
     T create_actor(const std::string id, int cpu_id, Args... args)
     {
         auto actor(std::make_shared<T>(id, cpu_id, args...));
-        actors_[id] = actor;
+        register_actor(id, actor);
         return *actor;
     }
 
-    void start()
+    template<typename T, typename... Args,
+        typename std::enable_if<!std::is_same<DPDKStream, T>::value>::type* = nullptr >
+    std::shared_ptr<T> create_stream(Args... args)
     {
-        // TODO: Considering tree dependency
-        for (auto& [id, actor] : actors_) {
-            actor->start();
-        }
-
-        // Make sure to be running all actors
-        for (auto& [n, actor] : actors_) {
-            actor->wait_until(Actor::State::Running);
-        }
+        auto stream(std::make_shared<T>(args...));
+        register_stream(stream);
+        return stream;
     }
 
-    void stop()
+    template<typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr >
+    std::shared_ptr<T> create_stream(Args... args)
     {
-        // TODO: Considering tree dependency
-        for (auto& [id, actor] : actors_) {
-            actor->stop();
-        }
+        register_runtime(Runtime::DPDK);
 
-        // Make sure to be ready all actors
-        for (auto& [n, actor] : actors_) {
-            actor->wait_until(Actor::State::Ready);
-        }
+        auto stream(std::make_shared<T>(std::dynamic_pointer_cast<DPDKRuntime>(select_runtime(Runtime::DPDK)), args...));
+        register_stream(stream);
+        return stream;
     }
 
-    void terminate()
-    {
-        // TODO: Considering tree dependency
-        for (auto& [n, actor] : actors_) {
-            actor->terminate();
-        }
+    void start();
 
-        // Make sure to finalize all actors
-        for (auto& [n, actor] : actors_) {
-            actor->wait_until(Actor::State::Fin);
-        }
-    }
+    void stop();
+
+    void terminate();
+
 
 private:
-    std::unordered_map<std::string, std::shared_ptr<Actor>> actors_;
+    void register_actor(const std::string& id, const std::shared_ptr<Actor>& actor);
+    void register_stream(const std::shared_ptr<Stream>& stream);
+    void register_runtime(Runtime::Type type);
+
+    std::shared_ptr<Runtime> select_runtime(Runtime::Type type);
+
+    std::shared_ptr<Impl> impl_;
 };
 
 }

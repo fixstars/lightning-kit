@@ -20,7 +20,7 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, int cpu_id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+    Receiver(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<rte_mbuf*>>& is, const std::shared_ptr<Queueable<rte_mbuf*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -38,13 +38,13 @@ protected:
     }
 
 private:
-    Stream<rte_mbuf*>* inner_stream_;
-    Stream<rte_mbuf*>* outer_stream_;
+    std::shared_ptr<Queueable<rte_mbuf*>> inner_stream_;
+    std::shared_ptr<Queueable<rte_mbuf*>> outer_stream_;
 };
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, int cpu_id, Stream<rte_mbuf*>* is, Stream<rte_mbuf*>* os)
+    Sender(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<rte_mbuf*>>& is, const std::shared_ptr<Queueable<rte_mbuf*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -62,8 +62,8 @@ protected:
     }
 
 private:
-    Stream<rte_mbuf*>* inner_stream_;
-    Stream<rte_mbuf*>* outer_stream_;
+    std::shared_ptr<Queueable<rte_mbuf*>> inner_stream_;
+    std::shared_ptr<Queueable<rte_mbuf*>> outer_stream_;
 };
 
 //                 +----------+                    +--------+
@@ -76,15 +76,11 @@ int main()
 
         System sys;
 
-        DPDKStream outer_stream(2);
-        MemoryStream<rte_mbuf*> inner_stream;
+        auto outer_stream(sys.create_stream<DPDKStream>(2));
+        auto inner_stream(sys.create_stream<MemoryStream<rte_mbuf*>>());
 
-        auto receiver(sys.create_actor<Receiver>("/receiver", 4,
-            &inner_stream,
-            &outer_stream));
-        auto sender(sys.create_actor<Sender>("/sender", 5,
-            &inner_stream,
-            &outer_stream));
+        auto receiver(sys.create_actor<Receiver>("/receiver", 4, inner_stream, outer_stream));
+        auto sender(sys.create_actor<Sender>("/sender", 5, inner_stream, outer_stream));
 
         sys.start();
 

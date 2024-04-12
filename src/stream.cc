@@ -6,39 +6,54 @@
 #endif
 
 #include "lng/stream.h"
+#include "lng/runtime.h"
 
 #include "log.h"
 
 namespace lng {
 
-DPDKStream::Impl::Impl(uint16_t port_id)
-    : port_id(port_id)
+void DPDKStream::Impl::wait_for_3wayhandshake()
 {
+    // Wait SYN, send SYN-ACK
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
+            continue;
+        send_synack(v);
+
+        tcp_port = tcp->dst_port;
+
+        rte_pktmbuf_free(v);
+        break;
+    }
+    
+    // Wait ACK
+    while (true) {
+        rte_mbuf* v;
+        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
+            continue;
+        }
+        
+        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
+        if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
+            continue;
+
+        rte_pktmbuf_free(v);
+        break;
+    }
+}
+
+void DPDKStream::start()
+{
+    int ret = 0;
+
     constexpr uint32_t mtu = 8000;
 
-    // Initializion the environment abstraction layer
-    std::vector<std::string> arguments = { "." };
-    std::vector<char*> args;
-    for (auto& a : arguments) {
-        args.push_back(&a[0]);
-    }
-    args.push_back(nullptr);
-
-    int ret = rte_eal_init(args.size() - 1, args.data());
-    if (ret < 0) {
-        throw std::runtime_error("Cannot initialize DPDK");
-    }
-
-    // Allocates mempool to hold the mbufs
-    constexpr uint32_t n = 8192 - 1;
-    constexpr uint32_t cache_size = 256;
-    constexpr uint32_t data_room_size = RTE_PKTMBUF_HEADROOM + 10 * 1024;
-
-    mbuf_pool = rte_pktmbuf_pool_create("mbuf_pool", n, cache_size, 0, data_room_size, rte_socket_id());
-    if (mbuf_pool == nullptr) {
-        throw std::runtime_error(fmt::format("Cannot create mbuf pool, n={}, cache_size={}, priv_size=0, data_room_size={}",
-            n, cache_size, data_room_size));
-    }
+    auto port_id = impl_->port_id;
 
     // Initializing all ports
     if (!rte_eth_dev_is_valid_port(port_id)) {
@@ -111,7 +126,7 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     rte_eth_rxconf rxconf = dev_info.default_rxconf;
     // rxconf.offloads = port_conf.rxmode.offloads;
     for (auto q = 0; q < rx_rings; q++) {
-        ret = rte_eth_rx_queue_setup(port_id, q, rx_desc_size, rte_eth_dev_socket_id(port_id), &rxconf, mbuf_pool);
+        ret = rte_eth_rx_queue_setup(port_id, q, rx_desc_size, rte_eth_dev_socket_id(port_id), &rxconf, impl_->rt->get_mempool());
         if (ret < 0) {
             throw std::runtime_error(fmt::format("Failed to setup Rx queue: {}", strerror(-ret)));
         }
@@ -155,43 +170,12 @@ DPDKStream::Impl::Impl(uint16_t port_id)
     }
 
     log::info("Link status is {}", link.link_status ? "up" : "down");
-
-    wait_for_3wayhandshake();
 }
 
-void DPDKStream::Impl::wait_for_3wayhandshake()
+void DPDKStream::stop()
 {
+    auto port_id = impl_->port_id;
 
-    while (true) {
-        rte_mbuf* v;
-        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
-            continue;
-        }
-        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
-        if (!(tcp->tcp_flags & RTE_TCP_SYN_FLAG))
-            continue;
-        send_synack(v);
-
-        tcp_port = tcp->dst_port;
-
-        rte_pktmbuf_free(v);
-        break;
-    }
-
-    while (true) {
-        rte_mbuf* v;
-        if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
-            continue;
-        }
-        auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
-        if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
-            continue;
-        break;
-    }
-}
-
-DPDKStream::Impl::~Impl()
-{
     auto ret = rte_eth_dev_stop(port_id);
     if (ret < 0) {
         log::error("Failed to stop device: {}", strerror(-ret));
@@ -211,7 +195,6 @@ DPDKStream::Impl::~Impl()
         // std::cout << "Bandwidth        : " << total_gbits/elapsed << " Gbps" << std::endl;
     }
 
-    rte_eal_cleanup();
 }
 
 bool DPDKStream::put(rte_mbuf** v, size_t count)
@@ -228,10 +211,15 @@ size_t DPDKStream::get(rte_mbuf** vp, size_t max)
     return rte_eth_rx_burst(impl_->port_id, 0, vp, max);
 }
 
+size_t DPDKStream::count()
+{
+    return rte_eth_rx_queue_count(impl_->port_id, 0);
+}
+
 bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
 
 {
-    auto ack_mbuf = rte_pktmbuf_copy(recv_mbuf, mbuf_pool, 0, sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr));
+    auto ack_mbuf = rte_pktmbuf_copy(recv_mbuf, rt->get_mempool(), 0, sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr));
 
     auto* eth = rte_pktmbuf_mtod_offset(ack_mbuf, rte_ether_hdr*, 0);
 

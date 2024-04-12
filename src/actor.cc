@@ -28,6 +28,11 @@ Actor::Actor(const std::string& id, int cpu_id)
 
 void Actor::start()
 {
+    if (impl_->state == State::Init) {
+        impl_->th = std::move(std::thread(entry_point, this));
+        wait_until(State::Ready);
+    }
+
     transit(State::Ready, State::Started);
 }
 
@@ -59,6 +64,9 @@ static inline void set_affinity(int cpu_id)
 void Actor::entry_point(Actor* obj)
 {
     set_affinity(obj->impl_->cpu_id);
+    
+    obj->transit(State::Init, State::Ready);
+    
     while (true) {
         try {
 
@@ -66,11 +74,9 @@ void Actor::entry_point(Actor* obj)
             State to;
             {
                 std::unique_lock lock(obj->impl_->mutex);
-                obj->impl_->cvar.wait(lock, [&] { return obj->impl_->state == State::Init | obj->impl_->state == State::Running | obj->impl_->state == State::Started | obj->impl_->state == State::Stopped | obj->impl_->state == State::Terminated; });
+                obj->impl_->cvar.wait(lock, [&] { return obj->impl_->state == State::Running | obj->impl_->state == State::Started | obj->impl_->state == State::Stopped | obj->impl_->state == State::Terminated; });
                 from = obj->impl_->state;
-                if (from == State::Init) {
-                    to = State::Ready;
-                } else if (from == State::Running) {
+                if (from == State::Running) {
                     to = from;
                 } else if (from == State::Started) {
                     to = State::Running;
@@ -87,10 +93,18 @@ void Actor::entry_point(Actor* obj)
                 obj->impl_->cvar.notify_all();
             }
 
+            if (from == State::Started && to == State::Running) {
+                obj->setup();
+            }
+
             if (to == State::Running) {
                 obj->main();
             } else if (to == State::Fin) {
                 return;
+            }
+
+            if (from == State::Stopped && to == State::Ready) {
+                obj->teardown();
             }
 
         } catch (const std::exception& e) {

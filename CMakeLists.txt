@@ -34,7 +34,9 @@ endif()
 if(LIBDOCAGPU_FOUND)
     set(LNG_WITH_DOCA 1)
     add_compile_definitions(LNG_WITH_DOCA=1)
-elseif(LIBDPDK_FOUND)
+endif()
+
+if(LIBDPDK_FOUND)
     set(LNG_WITH_DPDK 1)
     add_compile_definitions(LNG_WITH_DPDK=1)
 endif()
@@ -59,10 +61,11 @@ set(LNG_CORE_SRC
     src/receiver-actor.cc
     src/event.cc
     src/log.cc
+    src/runtime.cc
     src/stream.cc
     src/system.cc
     )
-if(LNG_WITH_CUDA)
+if(LNG_WITH_CUDA AND LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/protocol_tcp.cu
         src/protocol_udp.cu)
@@ -120,13 +123,15 @@ target_link_libraries(test_basic lng-core)
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
     target_link_libraries(test_dpdk_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
-    add_executable(dpdk_frame_builder_tcp test/dpdk_frame_builder_tcp.cc)
-    target_link_libraries(dpdk_frame_builder_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
+    add_executable(test_dpdk_build_frame_tcp test/dpdk_build_frame_tcp.cc)
+    target_link_libraries(test_dpdk_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
 if(LNG_WITH_DOCA)
     add_executable(test_doca_echo_udp test/doca_echo_udp.cc)
     target_link_libraries(test_doca_echo_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
     add_executable(test_doca_build_frame_tcp test/doca_build_frame_tcp.cc)
     target_link_libraries(test_doca_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()

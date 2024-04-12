@@ -18,7 +18,7 @@ void handler_sigint(int sig)
 
 class Receiver : public Actor {
 public:
-    Receiver(const std::string& id, int cpu_id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
+    Receiver(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<uint8_t*>>& is, const std::shared_ptr<Queueable<uint8_t*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -36,13 +36,13 @@ protected:
     }
 
 private:
-    Stream<uint8_t*>* inner_stream_;
-    Stream<uint8_t*>* outer_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> inner_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> outer_stream_;
 };
 
 class Sender : public Actor {
 public:
-    Sender(const std::string& id, int cpu_id, Stream<uint8_t*>* is, Stream<uint8_t*>* os)
+    Sender(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<uint8_t*>>& is, const std::shared_ptr<Queueable<uint8_t*>>& os)
         : Actor(id, cpu_id)
         , inner_stream_(is)
         , outer_stream_(os)
@@ -60,8 +60,8 @@ protected:
     }
 
 private:
-    Stream<uint8_t*>* inner_stream_;
-    Stream<uint8_t*>* outer_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> inner_stream_;
+    std::shared_ptr<Queueable<uint8_t*>> outer_stream_;
 };
 
 //                 +----------+                    +--------+
@@ -74,15 +74,15 @@ int main()
 
         System sys;
 
-        DOCAUDPStream outer_stream("17:00.1", "2a:00.0");
-        MemoryStream<uint8_t*> inner_stream;
+        auto outer_stream(sys.create_stream<DOCAUDPStream>("17:00.1", "2a:00.0"));
+        auto inner_stream(sys.create_stream<MemoryStream<uint8_t*>>());
 
         auto receiver(sys.create_actor<Receiver>("/receiver", 4,
-            &inner_stream,
-            &outer_stream));
+            inner_stream,
+            outer_stream));
         auto sender(sys.create_actor<Sender>("/sender", 5,
-            &inner_stream,
-            &outer_stream));
+            inner_stream,
+            outer_stream));
 
         sys.start();
 

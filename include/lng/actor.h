@@ -43,7 +43,7 @@ private:
         int cpu_id;
 
         Impl(Actor* obj, const std::string& id, int cpu)
-            : th(entry_point, obj)
+            : th()
             , mutex()
             , cvar()
             , id(id)
@@ -69,6 +69,8 @@ public:
     void wait_until(State to);
 
 protected:
+    virtual void setup() {}
+    virtual void teardown() {}
     virtual void main() = 0;
 
 private:

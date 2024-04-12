@@ -11,7 +11,7 @@ using namespace lng;
 template <typename T>
 class Producer : public Actor {
 public:
-    Producer(const std::string& id, int cpu_id, Stream<T>* s)
+    Producer(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<T>>& s)
         : Actor(id, cpu_id)
         , stream_(s)
         , v_(0)
@@ -26,14 +26,14 @@ protected:
     }
 
 private:
-    Stream<T>* stream_;
+    std::shared_ptr<Queueable<T>> stream_;
     int v_;
 };
 
 template <typename T>
 class Consumer : public Actor {
 public:
-    Consumer(const std::string& id, int cpu_id, Stream<T>* s)
+    Consumer(const std::string& id, int cpu_id, const std::shared_ptr<Queueable<T>> s)
         : Actor(id, cpu_id)
         , stream_(s)
     {
@@ -50,7 +50,7 @@ protected:
     }
 
 private:
-    Stream<T>* stream_;
+    std::shared_ptr<Queueable<T>> stream_;
 };
 
 int main()
@@ -58,10 +58,10 @@ int main()
     try {
         System sys;
 
-        MemoryStream<int> stream;
+        auto stream(sys.create_stream<MemoryStream<int>>());
 
-        auto consumer(sys.create_actor<Consumer<int>>("/consumer", 4, reinterpret_cast<Stream<int>*>(&stream)));
-        auto producer(sys.create_actor<Producer<int>>("/producer", 5, reinterpret_cast<Stream<int>*>(&stream)));
+        auto consumer(sys.create_actor<Consumer<int>>("/consumer", 4, stream));
+        auto producer(sys.create_actor<Producer<int>>("/producer", 5, stream));
 
         sys.start();
 
