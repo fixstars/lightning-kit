@@ -201,8 +201,8 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         std::unique_ptr<struct tx_buf> tx_buf_arr;
 
         static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = (size_t)2 * (size_t)1024 * 1024 * 1024;
-        static constexpr size_t TMP_FRAME_SIZE = (size_t)2 * (size_t)1024 * 1024 * 1024;
+        static constexpr size_t FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
+        static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
         uint32_t* first_ackn;
         int* is_fin;
