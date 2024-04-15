@@ -252,7 +252,7 @@ size_t DOCATCPStream::Impl::get(uint8_t** vp, size_t max)
         } else {
             doca_gpu_semaphore_get_custom_info_addr(sem_fr->sem_cpu, sem_idx, (void**)&(fr_info_global));
             DOCA_GPUNETIO_VOLATILE(vp[ret]) = DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload);
-            // printf("get %p\n", vp[ret]);
+            printf("get %p\n", vp[ret]);
             doca_gpu_semaphore_set_status(sem_fr->sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
         }
     }
