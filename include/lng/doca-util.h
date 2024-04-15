@@ -4,11 +4,11 @@
 #define GPU_PAGE_SIZE (1UL << 16)
 #define MAX_QUEUES 1
 #define MAX_PORT_STR_LEN 128 /* Maximal length of port name */
-#define MAX_PKT_NUM 65536
+#define MAX_PKT_NUM (65536 * 2)
 #define MAX_PKT_SIZE 8192
 #define MAX_RX_NUM_PKTS 2048
 #define MAX_RX_TIMEOUT_NS 10000 /* 10us */ // 1000000 /* 1ms */
-#define SEMAPHORES_PER_QUEUE 1024
+#define SEMAPHORES_PER_QUEUE (1024 * 2)
 #define CUDA_THREADS 512
 #define ETHER_ADDR_LEN 6
 #define FLOW_NB_COUNTERS 524228 /* 1024 x 512 */
@@ -164,8 +164,8 @@ struct stats_tcp {
 };
 
 struct rx_info {
-    uint32_t rx_pkt_num;
-    uint64_t rx_buf_idx;
+    int32_t rx_pkt_num;
+    int64_t rx_buf_idx;
     uint32_t cur_ackn;
 };
 
