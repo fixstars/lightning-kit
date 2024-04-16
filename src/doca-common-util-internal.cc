@@ -90,7 +90,7 @@ init_doca_flow(uint16_t port_id, uint8_t rxq_num, uint64_t offload_flags)
         return NULL;
     }
 
-    ret = rte_eth_dev_configure(port_id, rxq_num, rxq_num, &eth_conf);
+    ret = rte_eth_dev_configure(port_id, rxq_num, 1, &eth_conf);
     if (ret) {
         DOCA_LOG_ERR("Failed rte_eth_dev_configure with: %s", rte_strerror(-ret));
         return NULL;
@@ -115,12 +115,11 @@ init_doca_flow(uint16_t port_id, uint8_t rxq_num, uint64_t offload_flags)
             DOCA_LOG_ERR("Failed rte_eth_rx_queue_setup with: %s", rte_strerror(-ret));
             return NULL;
         }
-
-        ret = rte_eth_tx_queue_setup(port_id, idx, 2048, rte_eth_dev_socket_id(port_id), &tx_conf);
-        if (ret) {
-            DOCA_LOG_ERR("Failed rte_eth_tx_queue_setup with: %s", rte_strerror(-ret));
-            return NULL;
-        }
+    }
+    ret = rte_eth_tx_queue_setup(port_id, 0, 2048, rte_eth_dev_socket_id(port_id), &tx_conf);
+    if (ret) {
+        DOCA_LOG_ERR("Failed rte_eth_tx_queue_setup with: %s", rte_strerror(-ret));
+        return NULL;
     }
 
     ret = rte_flow_isolate(port_id, 1, &error);

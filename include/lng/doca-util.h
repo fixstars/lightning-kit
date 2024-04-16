@@ -2,9 +2,9 @@
 #define LNG_DOCA_UTIL_H
 
 #define GPU_PAGE_SIZE (1UL << 16)
-#define MAX_QUEUES 1
+#define MAX_QUEUES 2
 #define MAX_PORT_STR_LEN 128 /* Maximal length of port name */
-#define MAX_PKT_NUM (65536 * 4)
+#define MAX_PKT_NUM (65536 * 2)
 #define MAX_PKT_SIZE 8192
 #define MAX_RX_NUM_PKTS 2048
 #define MAX_RX_TIMEOUT_NS 10000 /* 10us */ // 1000000 /* 1ms */
@@ -116,6 +116,12 @@ struct semaphore {
     struct doca_gpu_semaphore* sem_cpu;
     struct doca_gpu_semaphore_gpu* sem_gpu;
     int sem_num;
+};
+
+struct work_buffers {
+    struct doca_gpu_eth_rxq** rxqs_gpu_tmp_buf;
+    struct doca_gpu_semaphore_gpu** sem_rxq_gpu_tmp_buf;
+    struct doca_gpu_semaphore_gpu** sem_pay_gpu_tmp_buf;
 };
 
 struct rx_queue {

@@ -164,25 +164,43 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         throw std::runtime_error("Function doca_gpu_create returned " + std::string(doca_error_get_descr(result)));
     }
 
-    int queue_num = 1;
+    int queue_num = MAX_QUEUES;
 
     df_port = init_doca_tcp_flow(port_id, queue_num);
     if (df_port == NULL) {
         throw std::runtime_error("FAILED: init_doca_flow");
     }
 
-    rxq.reset(new struct rx_queue);
-    sem_rx.reset(new struct semaphore);
-    sem_pay.reset(new struct semaphore);
+    rxqs.resize(queue_num);
+    sem_rxs.resize(queue_num);
+    sem_pays.resize(queue_num);
+
+    // for (auto& rxq : rxqs) {
+    //     rxq.reset(new struct rx_queue);
+    // }
+    // for (auto& sem_rx : sem_rxs) {
+    //     sem_rx.reset(new struct semaphore);
+    // }
+    // for (auto& sem_pay : sem_pays) {
+    //     sem_pay.reset(new struct semaphore);
+    // }
+
     sem_fr.reset(new struct semaphore);
     txq.reset(new struct tx_queue);
     tx_buf_arr.reset(new struct tx_buf);
+    work_buf.reset(new struct work_buffers);
 
-    create_rx_queue(rxq.get(), gpu_dev, ddev);
-    create_semaphore(sem_rx.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
-    create_semaphore(sem_pay.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_info), DOCA_GPU_MEM_TYPE_GPU);
+    for (auto& rxq : rxqs) {
+        create_rx_queue(&rxq, gpu_dev, ddev);
+    }
+    for (auto& sem_rx : sem_rxs) {
+        create_semaphore(&sem_rx, gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
+    }
+    for (auto& sem_pay : sem_pays) {
+        create_semaphore(&sem_pay, gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_info), DOCA_GPU_MEM_TYPE_GPU);
+    }
     create_semaphore(sem_fr.get(), gpu_dev, FRAME_NUM, sizeof(struct tcp_frame_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
-    create_tcp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
+    create_tcp_pipe(&rxq_pipe, rxqs.data(), df_port, queue_num);
 
     /* Create root control pipe to route tcp/udp/OS packets */
     create_tcp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe, df_port);
@@ -197,16 +215,21 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     cudaMalloc((void**)&first_ackn, sizeof(uint32_t));
     cudaMalloc((void**)&tar_bufs, FRAME_SIZE * FRAME_NUM);
     cudaMalloc((void**)&tmp_buf, TMP_FRAME_SIZE);
+    cudaMalloc((void**)&work_buf->rxqs_gpu_tmp_buf, queue_num * sizeof(struct doca_gpu_eth_rxq**));
+    cudaMalloc((void**)&work_buf->sem_rxq_gpu_tmp_buf, queue_num * sizeof(struct doca_gpu_semaphore_gpu**));
+    cudaMalloc((void**)&work_buf->sem_pay_gpu_tmp_buf, queue_num * sizeof(struct doca_gpu_semaphore_gpu**));
 
     std::vector<cudaStream_t> streams;
 
     init_tcp_kernels(streams);
     launch_tcp_kernels(
-        rxq.get(), txq.get(), tx_buf_arr.get(),
-        sem_rx.get(), sem_pay.get(), sem_fr.get(),
+        rxqs.data(), queue_num, txq.get(), tx_buf_arr.get(),
+        sem_rxs.data(), sem_pays.data(), sem_fr.get(),
         tar_bufs, FRAME_SIZE,
         tmp_buf,
-        first_ackn, is_fin, streams);
+        first_ackn, is_fin,
+        work_buf.get(),
+        streams);
 }
 
 DOCATCPStream::Impl::~Impl()
@@ -221,6 +244,9 @@ DOCATCPStream::Impl::~Impl()
     cudaFree(is_fin);
     cudaFree(tar_bufs);
     cudaFree(tmp_buf);
+    cudaFree(work_buf->rxqs_gpu_tmp_buf);
+    cudaFree(work_buf->sem_rxq_gpu_tmp_buf);
+    cudaFree(work_buf->sem_pay_gpu_tmp_buf);
 
     result = doca_gpu_destroy(gpu_dev);
     if (result != DOCA_SUCCESS) {

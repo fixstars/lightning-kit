@@ -20,6 +20,7 @@ namespace lng {
 struct rx_queue;
 struct tx_queue;
 struct semaphore;
+struct work_buffers;
 
 template <typename T>
 class Stream {
@@ -157,10 +158,10 @@ class DOCATCPStream : public Stream<uint8_t*> {
         struct doca_gpu* gpu_dev;
         struct doca_dev* ddev;
         struct doca_flow_port* df_port;
-        std::unique_ptr<struct rx_queue> rxq;
+        std::vector<struct rx_queue> rxqs;
         std::unique_ptr<struct tx_queue> txq;
-        std::unique_ptr<struct semaphore> sem_rx;
-        std::unique_ptr<struct semaphore> sem_pay;
+        std::vector<struct semaphore> sem_rxs;
+        std::vector<struct semaphore> sem_pays;
         std::unique_ptr<struct semaphore> sem_fr;
         uint32_t sem_fr_idx;
         uint16_t port_id;
@@ -168,6 +169,8 @@ class DOCATCPStream : public Stream<uint8_t*> {
         struct doca_flow_pipe* root_pipe;
         struct doca_flow_pipe_entry* root_udp_entry;
         std::unique_ptr<struct tx_buf> tx_buf_arr;
+
+        std::unique_ptr<struct work_buffers> work_buf;
 
         static constexpr uint32_t FRAME_NUM = 2;
         static constexpr size_t FRAME_SIZE = (size_t)2 * (size_t)1024 * 1024 * 1024;
