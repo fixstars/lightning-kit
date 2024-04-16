@@ -173,12 +173,14 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 
     rxq.reset(new struct rx_queue);
     sem_rx.reset(new struct semaphore);
+    sem_pay.reset(new struct semaphore);
     sem_fr.reset(new struct semaphore);
     txq.reset(new struct tx_queue);
     tx_buf_arr.reset(new struct tx_buf);
 
     create_rx_queue(rxq.get(), gpu_dev, ddev);
     create_semaphore(sem_rx.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
+    create_semaphore(sem_pay.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_info), DOCA_GPU_MEM_TYPE_GPU);
     create_semaphore(sem_fr.get(), gpu_dev, FRAME_NUM, sizeof(struct tcp_frame_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
     create_tcp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
 
@@ -201,7 +203,7 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     init_tcp_kernels(streams);
     launch_tcp_kernels(
         rxq.get(), txq.get(), tx_buf_arr.get(),
-        sem_rx.get(), sem_fr.get(),
+        sem_rx.get(), sem_pay.get(), sem_fr.get(),
         tar_bufs, FRAME_SIZE,
         tmp_buf,
         first_ackn, is_fin, streams);

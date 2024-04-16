@@ -160,6 +160,7 @@ class DOCATCPStream : public Stream<uint8_t*> {
         std::unique_ptr<struct rx_queue> rxq;
         std::unique_ptr<struct tx_queue> txq;
         std::unique_ptr<struct semaphore> sem_rx;
+        std::unique_ptr<struct semaphore> sem_pay;
         std::unique_ptr<struct semaphore> sem_fr;
         uint32_t sem_fr_idx;
         uint16_t port_id;
@@ -169,7 +170,7 @@ class DOCATCPStream : public Stream<uint8_t*> {
         std::unique_ptr<struct tx_buf> tx_buf_arr;
 
         static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
+        static constexpr size_t FRAME_SIZE = (size_t)2 * (size_t)1024 * 1024 * 1024;
         static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
         uint32_t* first_ackn;
