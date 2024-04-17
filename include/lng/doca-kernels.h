@@ -19,10 +19,6 @@ void launch_udp_kernels(struct rx_queue* rxq,
     std::vector<cudaStream_t>& streams);
 
 void init_tcp_kernels(std::vector<cudaStream_t>& streams);
-void wait_for_3wayhandshake(struct rx_queue* rxq,
-    struct tx_queue* txq,
-    struct tx_buf* tx_buf_arr,
-    uint32_t* first_ackn);
 void launch_tcp_kernels(struct rx_queue* rxq,
     struct tx_queue* txq,
     struct tx_buf* tx_buf_arr,

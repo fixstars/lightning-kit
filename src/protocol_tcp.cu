@@ -926,20 +926,6 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
     cudaStreamCreate(&streams[3]);
 }
 
-void wait_for_3wayhandshake(struct rx_queue* rxq,
-    struct tx_queue* txq,
-    struct tx_buf* tx_buf_arr,
-    uint32_t* first_ackn)
-{
-    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS>>>(
-        first_ackn,
-        rxq->eth_rxq_gpu,
-        txq->eth_txq_gpu,
-        tx_buf_arr->buf_arr_gpu);
-
-    cudaDeviceSynchronize();
-}
-
 void launch_tcp_kernels(struct rx_queue* rxq,
     struct tx_queue* txq,
     struct tx_buf* tx_buf_arr,
@@ -952,7 +938,14 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     std::vector<cudaStream_t>& streams, int id)
 {
 
-    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
+    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << id << std::endl;
+    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS, 0, streams[1]>>>(
+        first_ackn,
+        rxq->eth_rxq_gpu,
+        txq->eth_txq_gpu,
+        tx_buf_arr->buf_arr_gpu);
+    std::cout << "cuda_kernel_wait_3wayhandshake" << std::endl;
+    cudaStreamSynchronize(streams[1]);
 
     cuda_kernel_receive_tcp<<<1, 32, 0, streams[0]>>>(
         rxq->eth_rxq_gpu,

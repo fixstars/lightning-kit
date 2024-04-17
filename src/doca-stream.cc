@@ -210,8 +210,8 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         prepare_tcp_tx_buf(&tx_buf_arr[i]);
     }
 
-    cudaMalloc((void**)&is_fin, sizeof(int));
-    cudaMalloc((void**)&first_ackn, sizeof(uint32_t));
+    cudaMalloc((void**)&is_fin, sizeof(int) * rxq_num);
+    cudaMalloc((void**)&first_ackn, sizeof(uint32_t) * rxq_num);
     for (int i = 0; i < rxq_num; ++i) {
         cudaMalloc((void**)&tar_bufs[i], FRAME_SIZE * FRAME_NUM);
         cudaMalloc((void**)&tmp_buf[i], TMP_FRAME_SIZE);
@@ -222,25 +222,28 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     for (int i = 0; i < rxq_num; ++i) {
         init_tcp_kernels(streams[i]);
     }
-    wait_for_3wayhandshake(
-        &rxq[1], &txq[1], &tx_buf_arr[1],
-        first_ackn);
-    cudaMemset(is_fin, 0, sizeof(int));
-    for (int i = 0; i < rxq_num; ++i) {
-        launch_tcp_kernels(
-            &rxq[i], &txq[i], &tx_buf_arr[i],
-            &sem_rx[i], &sem_pay[i], &sem_fr[i],
-            tar_bufs[i], FRAME_SIZE,
-            tmp_buf[i],
-            first_ackn, is_fin, streams[i], i);
-    }
+
+    std::vector<std::thread> th(rxq_num);
+    cudaMemset(is_fin, 0, sizeof(int) * 2);
 
     for (int i = 0; i < rxq_num; ++i) {
-        for (auto& st : streams[i]) {
-            cudaStreamSynchronize(st);
-        }
+        th[i] = std::thread([&, i]() {
+            launch_tcp_kernels(
+                &rxq[i], &txq[i], &tx_buf_arr[i],
+                &sem_rx[i], &sem_pay[i], &sem_fr[i],
+                tar_bufs[i], FRAME_SIZE,
+                tmp_buf[i],
+                first_ackn + i, is_fin + i, streams[i], i);
+            for (auto& st : streams[i]) {
+                cudaStreamSynchronize(st);
+            }
+        });
     }
+
     cudaDeviceSynchronize();
+    for (int i = 0; i < rxq_num; ++i) {
+        th[i].join();
+    }
     exit(0);
 }
 
