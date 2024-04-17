@@ -179,8 +179,6 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         throw std::runtime_error("FAILED: init_doca_flow");
     }
 
-    int rxq_num = 2;
-
     rxq.resize(rxq_num);
     sem_rx.resize(rxq_num);
     sem_pay.resize(rxq_num);
@@ -188,6 +186,8 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     txq.resize(rxq_num);
     tx_buf_arr.resize(rxq_num);
     rxq_pipe.resize(rxq_num);
+    tar_bufs.resize(rxq_num);
+    tmp_buf.resize(rxq_num);
 
     std::vector<uint16_t> dst_ports = { 1234, 1235 };
 
@@ -200,7 +200,7 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     }
 
     /* Create root control pipe to route tcp/udp/OS packets */
-    create_tcp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe.data(), dst_ports.data(), 1, df_port);
+    create_tcp_root_pipe(&root_pipe, &root_udp_entry, rxq_pipe.data(), dst_ports.data(), rxq_num, df_port);
 
     for (int i = 0; i < rxq_num; ++i) {
         create_tx_queue(&txq[i], gpu_dev, ddev);
@@ -212,19 +212,27 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 
     cudaMalloc((void**)&is_fin, sizeof(int));
     cudaMalloc((void**)&first_ackn, sizeof(uint32_t));
-    cudaMalloc((void**)&tar_bufs, FRAME_SIZE * FRAME_NUM);
-    cudaMalloc((void**)&tmp_buf, TMP_FRAME_SIZE);
+    for (int i = 0; i < rxq_num; ++i) {
+        cudaMalloc((void**)&tar_bufs[i], FRAME_SIZE * FRAME_NUM);
+        cudaMalloc((void**)&tmp_buf[i], TMP_FRAME_SIZE);
+    }
 
     std::vector<std::vector<cudaStream_t>> streams(rxq_num);
 
     for (int i = 0; i < rxq_num; ++i) {
         init_tcp_kernels(streams[i]);
+    }
+    wait_for_3wayhandshake(
+        &rxq[1], &txq[1], &tx_buf_arr[1],
+        first_ackn);
+    cudaMemset(is_fin, 0, sizeof(int));
+    for (int i = 0; i < rxq_num; ++i) {
         launch_tcp_kernels(
             &rxq[i], &txq[i], &tx_buf_arr[i],
             &sem_rx[i], &sem_pay[i], &sem_fr[i],
-            tar_bufs, FRAME_SIZE,
-            tmp_buf,
-            first_ackn, is_fin, streams[i]);
+            tar_bufs[i], FRAME_SIZE,
+            tmp_buf[i],
+            first_ackn, is_fin, streams[i], i);
     }
 
     for (int i = 0; i < rxq_num; ++i) {
@@ -246,8 +254,10 @@ DOCATCPStream::Impl::~Impl()
 
     cudaFree(first_ackn);
     cudaFree(is_fin);
-    cudaFree(tar_bufs);
-    cudaFree(tmp_buf);
+    for (int i = 0; i < rxq_num; ++i) {
+        cudaFree(tar_bufs[i]);
+        cudaFree(tmp_buf[i]);
+    }
 
     result = doca_gpu_destroy(gpu_dev);
     if (result != DOCA_SUCCESS) {

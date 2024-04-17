@@ -201,14 +201,15 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         struct doca_flow_pipe_entry* root_udp_entry;
         std::vector<struct tx_buf> tx_buf_arr;
 
+        static constexpr int rxq_num = 2;
         static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
+        static constexpr size_t FRAME_SIZE = (size_t)512 * 1024 * 1024;
         static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
         uint32_t* first_ackn;
         int* is_fin;
-        uint8_t* tar_bufs;
-        uint8_t* tmp_buf;
+        std::vector<uint8_t*> tar_bufs;
+        std::vector<uint8_t*> tmp_buf;
 
         Impl(std::string nic_addr, std::string gpu_addr);
         ~Impl();

@@ -318,7 +318,7 @@ __global__ void send_ack(
     struct doca_gpu_buf_arr* buf_arr_gpu,
     int sem_rx_num, struct doca_gpu_semaphore_gpu* sem_recvinfo,
     int sem_pay_num, struct doca_gpu_semaphore_gpu* sem_payinfo,
-    int* is_fin, bool is_warmup)
+    int* is_fin, bool is_warmup, int id)
 {
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -474,7 +474,7 @@ __global__ void send_ack(
             }
             doca_gpu_dev_eth_txq_commit_strong(txq);
             doca_gpu_dev_eth_txq_push(txq);
-            // printf("doca_gpu_dev_eth_txq_push\n");
+            // printf("%d doca_gpu_dev_eth_txq_push\n", id);
             // auto tx_ed_clock = clock64();
         }
 
@@ -533,7 +533,7 @@ __global__ void cuda_kernel_makeframe(
     struct doca_gpu_eth_rxq* rxq,
     int sem_num, struct doca_gpu_semaphore_gpu* sem_recvinfo,
     uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
-    int* is_fin, bool is_warmup)
+    int* is_fin, bool is_warmup, int id)
 {
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -845,7 +845,7 @@ __global__ void cuda_kernel_makeframe(
                 ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
                 __threadfence_system();
                 printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
-                printf("%u pkt_num\n", pkt_num);
+                printf("%u %d pkt_num\n", pkt_num, id);
                 sem_frame_idx = (sem_frame_idx + 1) % frame_num;
                 cur_tar_buf = nullptr;
                 frame_head -= frame_size;
@@ -899,7 +899,7 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
 
     send_ack<<<1, CUDA_THREADS>>>(
         nullptr, nullptr, nullptr,
-        0, nullptr, 0, nullptr, nullptr, true);
+        0, nullptr, 0, nullptr, nullptr, true, 0);
 
     cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
         nullptr, 0,
@@ -908,7 +908,7 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         nullptr,
         0, nullptr,
         0, nullptr,
-        nullptr, true);
+        nullptr, true, 0);
 
     frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
 
@@ -926,6 +926,20 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
     cudaStreamCreate(&streams[3]);
 }
 
+void wait_for_3wayhandshake(struct rx_queue* rxq,
+    struct tx_queue* txq,
+    struct tx_buf* tx_buf_arr,
+    uint32_t* first_ackn)
+{
+    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS>>>(
+        first_ackn,
+        rxq->eth_rxq_gpu,
+        txq->eth_txq_gpu,
+        tx_buf_arr->buf_arr_gpu);
+
+    cudaDeviceSynchronize();
+}
+
 void launch_tcp_kernels(struct rx_queue* rxq,
     struct tx_queue* txq,
     struct tx_buf* tx_buf_arr,
@@ -935,20 +949,8 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     uint8_t* tar_bufs, size_t frame_size,
     uint8_t* tmp_buf,
     uint32_t* first_ackn, int* is_fin,
-    std::vector<cudaStream_t>& streams)
+    std::vector<cudaStream_t>& streams, int id)
 {
-
-    std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
-    cudaMemset(is_fin, 0, sizeof(int));
-
-    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS, 0, streams[1]>>>(
-        first_ackn,
-        rxq->eth_rxq_gpu,
-        txq->eth_txq_gpu,
-        tx_buf_arr->buf_arr_gpu);
-
-    cudaStreamSynchronize(streams[1]);
-    // cudaDeviceSynchronize();
 
     std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
 
@@ -963,7 +965,7 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         tx_buf_arr->buf_arr_gpu,
         sem_rx->sem_num, sem_rx->sem_gpu,
         sem_pay->sem_num, sem_pay->sem_gpu,
-        is_fin, false);
+        is_fin, false, id);
 
     cuda_kernel_makeframe<<<1, MAX_THREAD_NUM, 0, streams[1]>>>(
         tar_bufs, frame_size,
@@ -972,7 +974,7 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         rxq->eth_rxq_gpu,
         sem_pay->sem_num, sem_pay->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
-        is_fin, false);
+        is_fin, false, id);
 
     frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
 }
