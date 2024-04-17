@@ -6,6 +6,8 @@
 #include "doca-common-util-internal.h"
 #include "lng/doca-util.h"
 
+#include "log.h"
+
 DOCA_LOG_REGISTER(DOCA_TCP_UTIL);
 
 namespace lng {
@@ -69,14 +71,14 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 
     result = doca_flow_pipe_create(&pipe_cfg, &fwd, &miss_fwd, pipe);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("RxQ pipe creation failed with: %s", doca_error_get_descr(result));
+        log::error("RxQ pipe creation failed with: %s", doca_error_get_descr(result));
         return result;
     }
 
     // any TCP packets to be forwarded.
     result = doca_flow_pipe_add_entry(0, *pipe, NULL, NULL, NULL, NULL, 0, NULL, &dummy_entry);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("RxQ pipe-entry creation failed with: %s", doca_error_get_descr(result));
+        log::error("RxQ pipe-entry creation failed with: %s", doca_error_get_descr(result));
         // DOCA_GPUNETIO_VOLATILE(force_quit) = true;
         return result;
     }
@@ -85,11 +87,11 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 
     result = doca_flow_entries_process(port, 0, default_flow_timeout_usec, 0);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("RxQ pipe entry process failed with: %s", doca_error_get_descr(result));
+        log::error("RxQ pipe entry process failed with: %s", doca_error_get_descr(result));
         return result;
     }
 
-    DOCA_LOG_DBG("Created Pipe %s", pipe_cfg.attr.name);
+    log::debug("Created Pipe %s", pipe_cfg.attr.name);
 
     return DOCA_SUCCESS;
 }
@@ -100,7 +102,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //     doca_error_t result;
 
 //     if (tcp_queues == NULL) {
-//         DOCA_LOG_ERR("Can't destroy TCP queues, invalid input");
+//         log::error("Can't destroy TCP queues, invalid input");
 //         return DOCA_ERROR_INVALID_VALUE;
 //     }
 
@@ -111,13 +113,13 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //         if (tcp_queues->sem_cpu[idx]) {
 //             result = doca_gpu_semaphore_stop(tcp_queues->sem_cpu[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
+//                 log::error("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 
 //             result = doca_gpu_semaphore_destroy(tcp_queues->sem_cpu[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed doca_gpu_semaphore_destroy: %s", doca_error_get_descr(result));
+//                 log::error("Failed doca_gpu_semaphore_destroy: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 //         }
@@ -125,7 +127,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //         if (tcp_queues->eth_rxq_ctx[idx]) {
 //             result = doca_ctx_stop(tcp_queues->eth_rxq_ctx[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed doca_ctx_stop: %s", doca_error_get_descr(result));
+//                 log::error("Failed doca_ctx_stop: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 //         }
@@ -133,13 +135,13 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //         if (tcp_queues->pkt_buff_mmap[idx]) {
 //             result = doca_mmap_stop(tcp_queues->pkt_buff_mmap[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed to start mmap %s", doca_error_get_descr(result));
+//                 log::error("Failed to start mmap %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 
 //             result = doca_mmap_destroy(tcp_queues->pkt_buff_mmap[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed to destroy mmap: %s", doca_error_get_descr(result));
+//                 log::error("Failed to destroy mmap: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 //         }
@@ -147,7 +149,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //         if (tcp_queues->gpu_pkt_addr[idx]) {
 //             result = doca_gpu_mem_free(tcp_queues->gpu_dev, tcp_queues->gpu_pkt_addr[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed to free gpu memory: %s", doca_error_get_descr(result));
+//                 log::error("Failed to free gpu memory: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 //         }
@@ -155,7 +157,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //         if (tcp_queues->eth_rxq_cpu[idx]) {
 //             result = doca_eth_rxq_destroy(tcp_queues->eth_rxq_cpu[idx]);
 //             if (result != DOCA_SUCCESS) {
-//                 DOCA_LOG_ERR("Failed doca_eth_rxq_destroy: %s", doca_error_get_descr(result));
+//                 log::error("Failed doca_eth_rxq_destroy: %s", doca_error_get_descr(result));
 //                 return DOCA_ERROR_BAD_STATE;
 //             }
 //         }
@@ -177,7 +179,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 
 //     ret = rte_eth_dev_stop(port_id);
 //     if (ret != 0) {
-//         DOCA_LOG_ERR("Couldn't stop DPDK port %d err %d", port_id, ret);
+//         log::error("Couldn't stop DPDK port %d err %d", port_id, ret);
 //         return DOCA_ERROR_DRIVER;
 //     }
 
@@ -197,7 +199,7 @@ doca_error_t prepare_tcp_tx_buf(struct tx_buf* buf)
 
     cpu_pkt_addr = (uint8_t*)calloc(buf->num_packets * buf->max_pkt_sz, sizeof(uint8_t));
     if (cpu_pkt_addr == NULL) {
-        DOCA_LOG_ERR("Error in txbuf preparation, failed to allocate memory");
+        log::error("Error in txbuf preparation, failed to allocate memory");
         return DOCA_ERROR_NO_MEMORY;
     }
 
@@ -241,7 +243,7 @@ doca_error_t prepare_tcp_tx_buf(struct tx_buf* buf)
     res_cuda = cudaMemcpy(buf->gpu_pkt_addr, cpu_pkt_addr, buf->num_packets * buf->max_pkt_sz, cudaMemcpyDefault);
     free(cpu_pkt_addr);
     if (res_cuda != cudaSuccess) {
-        DOCA_LOG_ERR("Function CUDA Memcpy cqe_addr failed with %s", cudaGetErrorString(res_cuda));
+        log::error("Function CUDA Memcpy cqe_addr failed with %s", cudaGetErrorString(res_cuda));
         return DOCA_ERROR_DRIVER;
     }
 
@@ -249,9 +251,9 @@ doca_error_t prepare_tcp_tx_buf(struct tx_buf* buf)
 }
 
 doca_error_t
-create_tcp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port)
+create_tcp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe** rxq_pipe, uint16_t* dst_ports, int rxq_num, struct doca_flow_port* port)
 {
-    return create_root_pipe(root_pipe, root_entry, rxq_pipe, port, DOCA_FLOW_L4_TYPE_EXT_TCP);
+    return create_root_pipe(root_pipe, root_entry, rxq_pipe, dst_ports, rxq_num, port, DOCA_FLOW_L4_TYPE_EXT_TCP);
 }
 
 } // lng

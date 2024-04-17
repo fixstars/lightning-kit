@@ -941,13 +941,14 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
     cudaMemset(is_fin, 0, sizeof(int));
 
-    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS>>>(
+    cuda_kernel_wait_3wayhandshake<<<1, CUDA_THREADS, 0, streams[1]>>>(
         first_ackn,
         rxq->eth_rxq_gpu,
         txq->eth_txq_gpu,
         tx_buf_arr->buf_arr_gpu);
 
-    cudaDeviceSynchronize();
+    cudaStreamSynchronize(streams[1]);
+    // cudaDeviceSynchronize();
 
     std::cout << cudaGetErrorString(cudaPeekAtLastError()) << " 	cudaPeekAtLastError" << std::endl;
 
@@ -974,13 +975,6 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         is_fin, false);
 
     frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
-
-    cudaStreamSynchronize(streams[0]);
-    cudaStreamSynchronize(streams[1]);
-    cudaStreamSynchronize(streams[2]);
-    cudaStreamSynchronize(streams[3]);
-    cudaDeviceSynchronize();
-    exit(0);
 }
 
 }
