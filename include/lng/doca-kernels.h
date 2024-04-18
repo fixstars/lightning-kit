@@ -9,13 +9,20 @@
 
 namespace lng {
 
-void init_udp_kernels(std::vector<cudaStream_t>& streams);
-void launch_udp_kernels(struct rx_queue* rxq,
+void init_udp_echo_kernels(std::vector<cudaStream_t>& streams);
+void launch_udp_echo_kernels(struct rx_queue* rxq,
     struct tx_queue* txq,
     struct tx_buf* tx_buf_arr,
     struct semaphore* sem_rx,
     struct semaphore* sem_fr,
     struct semaphore* sem_reply,
+    std::vector<cudaStream_t>& streams);
+void init_udp_framebuilding_kernels(std::vector<cudaStream_t>& streams);
+void launch_udp_framebuilding_kernels(struct rx_queue* rxq,
+    struct semaphore* sem_rx,
+    struct semaphore* sem_fr,
+    uint8_t* tar_buf, size_t frame_size,
+    uint8_t* tmp_buf,
     std::vector<cudaStream_t>& streams);
 
 void init_tcp_kernels(std::vector<cudaStream_t>& streams);
