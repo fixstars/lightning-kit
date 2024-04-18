@@ -138,7 +138,7 @@ public:
             uint8_t* body = reinterpret_cast<uint8_t*>(rte_pktmbuf_append(buf, segmented_payload_size));
             memcpy(body, payload_ptr, segmented_payload_size);
 
-            uint16_t dgram_len = segmented_payload_size + sizeof(struct rte_udp_hdr);
+            uint16_t dgram_len = segmented_payload_size + sizeof(struct rte_udp_hdr) + sizeof(struct udp_payload_header);
 
             remaining -= segmented_payload_size;
             payload_ptr += segmented_payload_size;
@@ -459,6 +459,7 @@ int sending_udp_data(void* arg1)
                 auto* udp_custom_header = rte_pktmbuf_mtod_offset(bs[i], struct udp_payload_header*, bs[i]->l2_len + bs[i]->l3_len + bs[i]->l4_len);
                 udp_custom_header->seqn = seqn.at(idx);
                 seqn.at(idx) += rte_pktmbuf_pkt_len(bs[i]) - bs[i]->l2_len - bs[i]->l3_len - bs[i]->l4_len - sizeof(struct udp_payload_header);
+                // std::cout << idx << " " << rte_cpu_to_be_16(udp->dgram_len) << " " << udp_custom_header->seqn << " udp_custom_header->seqn" << std::endl;
                 // std::cout << bs[i]->l2_len << " " << bs[i]->l3_len << " " << bs[i]->l4_len << " l2 l3 l4" << std::endl;
                 itr++;
             }
@@ -838,7 +839,7 @@ int main(int argc, char** argv)
     ;
 
     program.add_argument("--frame_num")
-        .default_value<uint32_t>(128)
+        .default_value<uint32_t>(1024 * 1024)
         .help("specify the # of frame")
         .scan<'u', uint32_t>();
 
