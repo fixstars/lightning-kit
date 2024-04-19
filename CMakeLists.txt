@@ -76,7 +76,8 @@ if(LNG_WITH_DOCA)
         src/doca-common-util-internal.cc
         src/doca-stream.cc
         src/doca-tcp-util.cc
-        src/doca-udp-util.cc)
+        src/doca-udp-util.cc
+        test/heavy_memcpy.cu)
 endif()
 add_library(lng-core ${LNG_CORE_SRC})
 
@@ -119,6 +120,9 @@ target_link_libraries(lng-core
 #
 add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
+
+add_executable(test_heavy test/heavy_memcpy.cpp)
+target_link_libraries(test_heavy lng-core)
 
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)
