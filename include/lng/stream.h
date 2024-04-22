@@ -53,8 +53,8 @@ public:
     {
     }
 
-    virtual void start() {}
-    virtual void stop() {}
+    virtual void start() { }
+    virtual void stop() { }
 
     virtual bool put(T* v, size_t count)
     {
@@ -89,8 +89,10 @@ class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
-            : rt(rt), port_id(port_id)
-        {}
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
 
     private:
         bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
@@ -121,7 +123,8 @@ public:
         return impl_->check_target_packet(recv_mbuf);
     }
 
-    void wait_for_3wayhandshake() {
+    void wait_for_3wayhandshake()
+    {
         impl_->wait_for_3wayhandshake();
     }
 
@@ -164,8 +167,12 @@ public:
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -176,7 +183,7 @@ public:
     {
         return impl_->get(vp, max);
     }
-    
+
     virtual size_t count();
 
 private:
@@ -201,7 +208,7 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         struct doca_flow_pipe_entry* root_udp_entry;
         std::vector<struct tx_buf> tx_buf_arr;
 
-        static constexpr int rxq_num = 2;
+        static constexpr int rxq_num = 1;
         static constexpr uint32_t FRAME_NUM = 2;
         static constexpr size_t FRAME_SIZE = (size_t)512 * 1024 * 1024;
         static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
@@ -223,8 +230,12 @@ public:
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -275,7 +286,7 @@ struct Payload {
 };
 #endif
 struct Frame {
-    static constexpr size_t frame_size = 256;//64 * 1024 * 1024;
+    static constexpr size_t frame_size = 256; // 64 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };
