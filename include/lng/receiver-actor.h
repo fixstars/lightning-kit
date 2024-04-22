@@ -29,7 +29,7 @@ private:
     std::shared_ptr<Queueable<Payload*>> valid_payload_stream_;
     std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
 
-    Payload *payload_;
+    Payload* payload_;
 };
 
 class FrameBuilder : public Actor {
@@ -62,7 +62,7 @@ private:
     std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
     std::shared_ptr<Queueable<Frame*>> valid_frame_stream_;
     std::shared_ptr<Queueable<Frame*>> ready_frame_stream_;
-    #if 0
+#if 0
     Frame* next_frame_;
     size_t frame_id_;
     size_t write_head_;
@@ -73,6 +73,34 @@ private:
     Frame* frame_;
     size_t frame_id_;
     size_t frame_write_offset_;
-    #endif
+#endif
 };
+
+class ReceiverGPU : public Actor {
+public:
+    ReceiverGPU(const std::string& id,
+        int cpu_id,
+        const std::shared_ptr<DPDKGPUUDPStream>& dpdk_st,
+        const std::shared_ptr<Queueable<Payload*>>& valid,
+        const std::shared_ptr<Queueable<Payload*>>& ready)
+        : Actor(id, cpu_id)
+        , nic_stream_(dpdk_st)
+        , valid_payload_stream_(valid)
+        , ready_payload_stream_(ready)
+        , payload_(nullptr)
+    {
+    }
+
+protected:
+    virtual void setup() override;
+    virtual void main() override;
+
+private:
+    std::shared_ptr<DPDKGPUUDPStream> nic_stream_;
+    std::shared_ptr<Queueable<Payload*>> valid_payload_stream_;
+    std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
+
+    Payload* payload_;
+};
+
 }

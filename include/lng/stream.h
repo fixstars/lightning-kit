@@ -18,6 +18,7 @@ struct doca_flow_pipe_entry;
 namespace lng {
 
 class DPDKRuntime;
+class DPDKGPURuntime;
 struct rx_queue;
 struct tx_queue;
 struct semaphore;
@@ -53,8 +54,8 @@ public:
     {
     }
 
-    virtual void start() {}
-    virtual void stop() {}
+    virtual void start() { }
+    virtual void stop() { }
 
     virtual bool put(T* v, size_t count)
     {
@@ -89,8 +90,10 @@ class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
-            : rt(rt), port_id(port_id)
-        {}
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
 
     private:
         bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
@@ -121,9 +124,43 @@ public:
         return impl_->check_target_packet(recv_mbuf);
     }
 
-    void wait_for_3wayhandshake() {
+    void wait_for_3wayhandshake()
+    {
         impl_->wait_for_3wayhandshake();
     }
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+class DPDKGPUUDPStream : public Stream, public Queueable<rte_mbuf*> {
+
+    struct Impl {
+        std::shared_ptr<DPDKGPURuntime> rt;
+        uint16_t port_id;
+        uint16_t tcp_port;
+
+        Impl(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
+    };
+
+public:
+    DPDKGPUUDPStream(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
+    {
+    }
+
+    virtual void start();
+    virtual void stop();
+
+    virtual bool put(rte_mbuf** v, size_t count);
+
+    virtual size_t get(rte_mbuf** vp, size_t max);
+
+    virtual size_t count();
 
 private:
     std::shared_ptr<Impl> impl_;
@@ -164,8 +201,12 @@ public:
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -176,7 +217,7 @@ public:
     {
         return impl_->get(vp, max);
     }
-    
+
     virtual size_t count();
 
 private:
@@ -221,8 +262,12 @@ public:
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -273,7 +318,7 @@ struct Payload {
 };
 #endif
 struct Frame {
-    static constexpr size_t frame_size = 256;//64 * 1024 * 1024;
+    static constexpr size_t frame_size = 256; // 64 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };

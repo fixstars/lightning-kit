@@ -72,15 +72,18 @@ void System::terminate()
     }
 }
 
-void System::register_actor(const std::string& id, const std::shared_ptr<Actor>& actor) {
+void System::register_actor(const std::string& id, const std::shared_ptr<Actor>& actor)
+{
     impl_->actors[id] = actor;
 }
 
-void System::register_stream(const std::shared_ptr<Stream>& stream) {
+void System::register_stream(const std::shared_ptr<Stream>& stream)
+{
     impl_->streams.push_back(stream);
 }
 
-void System::register_runtime(Runtime::Type type) {
+void System::register_runtime(Runtime::Type type)
+{
 #if defined(LNG_WITH_DOCA)
     if (type == Runtime::DOCA && !impl_->runtimes.count(type)) {
         impl_->runtimes[type] = std::make_shared<DOCARuntime>();
@@ -93,10 +96,15 @@ void System::register_runtime(Runtime::Type type) {
         impl_->runtimes[type] = std::make_shared<DPDKRuntime>();
         return;
     }
+    if (type == Runtime::DPDKGPU && !impl_->runtimes.count(type)) {
+        impl_->runtimes[type] = std::make_shared<DPDKGPURuntime>(2);
+        return;
+    }
 #endif
 }
 
-std::shared_ptr<Runtime> System::select_runtime(Runtime::Type type) {
+std::shared_ptr<Runtime> System::select_runtime(Runtime::Type type)
+{
     return impl_->runtimes[type];
 }
 

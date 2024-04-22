@@ -159,11 +159,11 @@ void FrameBuilder::main()
             size_t copy_size = Frame::frame_size - frame_write_offset_;
             log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, copy_size);
-            
+
             // Store payload segment id and read offset for the next frame
             payload_segment_id_ = seg;
             payload_segment_read_offset_ = segment_size - copy_size;
-            
+
             // Frame is pushed to the stream
             frame_->frame_id = this->frame_id_++;
             valid_frame_stream_->put(&frame_, 1);
@@ -174,11 +174,11 @@ void FrameBuilder::main()
             // The payload can fit into the frame exactly
             log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
-            
+
             // Payload segment id and read offset should be point to the next segment because the payload is fully copied
             payload_segment_id_ = seg + 1;
             payload_segment_read_offset_ = 0;
-            
+
             // Frame is pushed to the stream
             frame_->frame_id = this->frame_id_++;
             valid_frame_stream_->put(&frame_, 1);
@@ -201,6 +201,45 @@ void FrameBuilder::main()
         payload_segment_id_ = 0;
         payload_segment_read_offset_ = 0;
     }
+}
+
+void ReceiverGPU::setup()
+{
+}
+
+void ReceiverGPU::main()
+{
+    // if (!payload_) {
+    //     if (!ready_payload_stream_->get(&payload_, 1)) {
+    //         return;
+    //     }
+    //     payload_->Clear();
+    // }
+
+    rte_mbuf* v[16];
+    int nb;
+    if (nb = nic_stream_->get(v, 16) == 0) {
+        return;
+    }
+
+    log::info("kokotootta");
+
+    for (int i = 0; i < nb; ++i) {
+        rte_pktmbuf_free(v[i]);
+    }
+
+    // if (!nic_stream_->check_target_packet(v)) {
+    //     return;
+    // }
+
+    // TODO detect FIN and quit
+    // auto len = payload_->ExtractPayload(v);
+
+    // nic_stream_->send_ack(v, len);
+
+    // valid_payload_stream_->put(&payload_, 1);
+
+    payload_ = nullptr;
 }
 
 } // lng

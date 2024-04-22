@@ -11,6 +11,7 @@ class Runtime {
 public:
     enum Type {
         DPDK,
+        DPDKGPU,
         DOCA
     };
 
@@ -27,6 +28,29 @@ public:
 
     virtual void stop() { }
 };
+
+class DPDKGPURuntime : public Runtime {
+public:
+    DPDKGPURuntime(uint16_t port_id)
+        : port_id_(port_id)
+    {
+    }
+
+    virtual void start();
+
+    virtual void stop();
+
+    rte_mempool* get_mempool()
+    {
+        return mbuf_pool_;
+    }
+
+private:
+    rte_mempool* mbuf_pool_;
+    uint16_t port_id_;
+    struct rte_gpu_comm_list* comm_list_;
+};
+
 #endif
 
 #if defined(LNG_WITH_DPDK)
@@ -37,7 +61,8 @@ public:
 
     virtual void stop();
 
-    rte_mempool* get_mempool() {
+    rte_mempool* get_mempool()
+    {
         return mbuf_pool_;
     }
 
