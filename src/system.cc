@@ -97,7 +97,7 @@ void System::register_runtime(Runtime::Type type)
         return;
     }
     if (type == Runtime::DPDKGPU && !impl_->runtimes.count(type)) {
-        impl_->runtimes[type] = std::make_shared<DPDKGPURuntime>(2);
+        impl_->runtimes[type] = std::make_shared<DPDKGPURuntime>(1); // TODO
         return;
     }
 #endif

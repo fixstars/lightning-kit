@@ -3,9 +3,9 @@
 #include <rte_mbuf.h>
 #include <rte_tcp.h>
 
-#include "lng/receiver-actor.h"
-
 #include "log.h"
+
+#include "lng/receiver-actor.h"
 
 namespace lng {
 
@@ -201,45 +201,6 @@ void FrameBuilder::main()
         payload_segment_id_ = 0;
         payload_segment_read_offset_ = 0;
     }
-}
-
-void ReceiverGPU::setup()
-{
-}
-
-void ReceiverGPU::main()
-{
-    // if (!payload_) {
-    //     if (!ready_payload_stream_->get(&payload_, 1)) {
-    //         return;
-    //     }
-    //     payload_->Clear();
-    // }
-
-    rte_mbuf* v[16];
-    int nb;
-    if (nb = nic_stream_->get(v, 16) == 0) {
-        return;
-    }
-
-    log::info("kokotootta");
-
-    for (int i = 0; i < nb; ++i) {
-        rte_pktmbuf_free(v[i]);
-    }
-
-    // if (!nic_stream_->check_target_packet(v)) {
-    //     return;
-    // }
-
-    // TODO detect FIN and quit
-    // auto len = payload_->ExtractPayload(v);
-
-    // nic_stream_->send_ack(v, len);
-
-    // valid_payload_stream_->put(&payload_, 1);
-
-    payload_ = nullptr;
 }
 
 } // lng

@@ -59,6 +59,8 @@ file(GENERATE OUTPUT ${PROJECT_BINARY_DIR}/VERSION CONTENT "${LNG_KIT_VERSION_S}
 set(LNG_CORE_SRC
     src/actor.cc
     src/receiver-actor.cc
+    src/receiver-actor.cu
+    src/receiver-actor-gpu.cc
     src/event.cc
     src/log.cc
     src/runtime.cc
@@ -128,6 +130,11 @@ if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     target_link_libraries(test_dpdk_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 
     add_executable(test_dpdk_gpu_build_frame_udp test/dpdk_gpu_build_frame_udp.cc)
+    target_include_directories(
+      test_dpdk_gpu_build_frame_udp 
+      PRIVATE 
+      ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    )
     target_link_libraries(test_dpdk_gpu_build_frame_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 

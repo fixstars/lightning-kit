@@ -300,6 +300,8 @@ void DPDKGPUUDPStream::start()
 
     auto port_id = impl_->port_id;
 
+    log::info("{} port_id", port_id);
+
     // Initializing all ports
     if (!rte_eth_dev_is_valid_port(port_id)) {
         throw std::runtime_error(fmt::format("Port {} is not valid", port_id));

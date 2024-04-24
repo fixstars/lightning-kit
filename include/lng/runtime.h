@@ -48,7 +48,6 @@ public:
 private:
     rte_mempool* mbuf_pool_;
     uint16_t port_id_;
-    struct rte_gpu_comm_list* comm_list_;
 };
 
 #endif

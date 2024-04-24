@@ -75,32 +75,4 @@ private:
     size_t frame_write_offset_;
 #endif
 };
-
-class ReceiverGPU : public Actor {
-public:
-    ReceiverGPU(const std::string& id,
-        int cpu_id,
-        const std::shared_ptr<DPDKGPUUDPStream>& dpdk_st,
-        const std::shared_ptr<Queueable<Payload*>>& valid,
-        const std::shared_ptr<Queueable<Payload*>>& ready)
-        : Actor(id, cpu_id)
-        , nic_stream_(dpdk_st)
-        , valid_payload_stream_(valid)
-        , ready_payload_stream_(ready)
-        , payload_(nullptr)
-    {
-    }
-
-protected:
-    virtual void setup() override;
-    virtual void main() override;
-
-private:
-    std::shared_ptr<DPDKGPUUDPStream> nic_stream_;
-    std::shared_ptr<Queueable<Payload*>> valid_payload_stream_;
-    std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
-
-    Payload* payload_;
-};
-
 }

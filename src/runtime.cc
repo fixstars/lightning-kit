@@ -100,6 +100,8 @@ void DPDKGPURuntime::start()
     if (rte_extmem_register(ext_mem.buf_ptr, ext_mem.buf_len, NULL, ext_mem.buf_iova, GPU_PAGE_SIZE) < 0) {
         throw std::runtime_error("rte_extmem_register fail");
     }
+    log::info("{} port_id_", port_id_);
+
     rte_eth_dev_info_get(port_id_, &dev_info);
 
     if (rte_dev_dma_map(dev_info.device, ext_mem.buf_ptr, ext_mem.buf_iova, ext_mem.buf_len) < 0) {
@@ -108,10 +110,6 @@ void DPDKGPURuntime::start()
     mbuf_pool_ = rte_pktmbuf_pool_create_extbuf("gpu_mempool", n,
         cache_size, 0, ext_mem.elt_size,
         rte_socket_id(), &ext_mem, 1);
-
-    int num_entries = 1024;
-
-    comm_list_ = rte_gpu_comm_create_list(gpu_dev_id, num_entries);
 }
 
 void DPDKGPURuntime::stop()

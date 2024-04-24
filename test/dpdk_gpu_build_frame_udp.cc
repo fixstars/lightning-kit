@@ -10,6 +10,7 @@
 #include <rte_mbuf.h>
 
 #include "lng/lng.h"
+#include "lng/receiver-actor-gpu.h"
 #include "lng/receiver-actor.h"
 
 using namespace std::chrono_literals;
@@ -66,7 +67,7 @@ int main()
 
         System sys;
 
-        auto dpdk_stream = sys.create_stream<DPDKGPUUDPStream>(2);
+        auto dpdk_stream = sys.create_stream<DPDKGPUUDPStream>(1);
         auto valid_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
         auto ready_frame_stream = sys.create_stream<MemoryStream<Frame*>>();
         auto valid_payload_stream = sys.create_stream<MemoryStream<Payload*>>();
