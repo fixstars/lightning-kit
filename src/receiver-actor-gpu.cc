@@ -28,6 +28,14 @@ void ReceiverGPU::setup()
 
     quit_flag_.reset(new struct rte_gpu_comm_flag);
 
+    mbufs.resize(num_entries);
+#define PACKT_NUM_AT_ONCE 4096
+    for (auto& mbuf : mbufs) {
+        mbuf.reset(new rte_mbuf*[PACKT_NUM_AT_ONCE]);
+    }
+
+    mbufs_num.resize(num_entries);
+
     rte_gpu_comm_create_flag(gpu_dev_id, quit_flag_.get(), RTE_GPU_COMM_FLAG_CPU);
     rte_gpu_comm_set_flag(quit_flag_.get(), 0);
 
@@ -57,26 +65,33 @@ void ReceiverGPU::main()
     //     payload_->Clear();
     // }
 
-#define PACKT_NUM_AT_ONCE 4096
-
-    rte_mbuf* v[PACKT_NUM_AT_ONCE];
     int nb;
-    if (nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE) == 0) {
+
+    rte_mbuf** v = mbufs.at(comm_list_idx_ % num_entries).get();
+
+    if ((nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE)) == 0) {
         return;
     }
 
-    rte_gpu_comm_populate_list_pkts(comm_list_ + comm_list_idx_, v, nb);
+    rte_gpu_comm_populate_list_pkts(comm_list_ + (comm_list_idx_ % num_entries), v, nb);
+    mbufs_num.at(comm_list_idx_ % num_entries) = nb;
 
-    // log::info("kokotootta");
+    comm_list_idx_++;
 
-    // temporary
-    while (rte_gpu_comm_cleanup_list(comm_list_ + comm_list_idx_))
-        ;
+    // log::info("kokotootta {} {}", nb, nic_stream_->count());
 
-    comm_list_idx_ = (comm_list_idx_ + 1) % num_entries;
+    while (comm_list_free_idx_ < comm_list_idx_) {
 
-    for (int i = 0; i < nb; ++i) {
-        rte_pktmbuf_free(v[i]);
+        rte_gpu_comm_list_status status;
+        rte_gpu_comm_get_status(comm_list_ + (comm_list_free_idx_ % num_entries), &status);
+        if (status == RTE_GPU_COMM_LIST_READY) {
+            break;
+        }
+
+        // log::info("{} {} {} num", comm_list_free_idx_, comm_list_idx_, mbufs_num.at(comm_list_free_idx_ % num_entries));
+        rte_pktmbuf_free_bulk(mbufs.at(comm_list_free_idx_ % num_entries).get(), mbufs_num.at(comm_list_free_idx_ % num_entries));
+        rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
+        comm_list_free_idx_++;
     }
 
     // if (!nic_stream_->check_target_packet(v)) {

@@ -461,7 +461,8 @@ size_t DPDKGPUUDPStream::get(rte_mbuf** vp, size_t max)
 
 size_t DPDKGPUUDPStream::count()
 {
-    return rte_eth_rx_queue_count(impl_->port_id, 0);
+    return rte_mempool_in_use_count(impl_->rt->get_mempool());
+    // return rte_eth_rx_queue_count(impl_->port_id, 0);
 }
 
 } // lng

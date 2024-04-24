@@ -205,6 +205,8 @@ __global__ void cuda_kernel_makeframe(
         bool is_head_copy = false;
 
         if ((!cur_tar_buf) && threadIdx.x == 0) {
+            // printf("%d rx_buf_idx_tail\n", rx_buf_idx_tail);
+
             // ret = doca_gpu_dev_semaphore_get_status(sem_frame, sem_frame_idx, &status_frame);
             // if (ret != DOCA_SUCCESS) {
             //     printf("TCP semaphore error");
@@ -266,6 +268,8 @@ __global__ void cuda_kernel_makeframe(
                 payload += sizeof(struct udp_payload_header);
                 uint32_t total_payload_size = BYTE_SWAP16(hdr->l4_hdr.dgram_len) - sizeof(struct udp_hdr) - sizeof(struct udp_payload_header);
 
+                // printf("%u sent_seq\n", sent_seq);
+                // printf("%u total_payload_size\n", total_payload_size);
                 if (idx == rx_buf_idx_tail - 1) {
                     next_prev_ackn = sent_seq + total_payload_size;
                 }
@@ -309,7 +313,9 @@ __global__ void cuda_kernel_makeframe(
 
         if (warp_id == 1 && lane_id == 0) {
             uint64_t bytes = (next_prev_ackn - prev_ackn);
+            // printf("%" PRIu64 " frame_head\n", frame_head);
             // printf("%" PRIu64 " cur_ackn_fin\n", cur_ackn);
+            // printf("%" PRIu64 " next_prev_ackn\n", next_prev_ackn);
             // printf("%" PRIu64 " prev_ackn\n", prev_ackn);
             // bytes_local += bytes;
             // if (heart_beat % 50 == 0) {
@@ -337,7 +343,7 @@ __global__ void cuda_kernel_makeframe(
                 frame_head -= frame_size;
                 // quit = true;
             }
-            prev_ackn = cur_ackn;
+            prev_ackn = next_prev_ackn;
         }
 
         __syncthreads();

@@ -25,6 +25,7 @@ public:
         , valid_payload_stream_(valid)
         , ready_payload_stream_(ready)
         , comm_list_idx_(0)
+        , comm_list_free_idx_(0)
         , comm_list_(nullptr)
     {
     }
@@ -41,7 +42,10 @@ private:
     std::vector<cudaStream_t> streams_;
 
     static constexpr int num_entries = 1024;
-    int comm_list_idx_;
+    size_t comm_list_idx_;
+    size_t comm_list_free_idx_;
+    std::vector<std::shared_ptr<rte_mbuf*>> mbufs;
+    std::vector<size_t> mbufs_num;
 
     struct rte_gpu_comm_list* comm_list_;
     struct doca_gpu* gpu_dev_;
