@@ -166,6 +166,42 @@ private:
     std::shared_ptr<Impl> impl_;
 };
 
+class DPDKGPUTCPStream : public Stream, public Queueable<rte_mbuf*> {
+
+    struct Impl {
+        std::shared_ptr<DPDKGPURuntime> rt;
+        uint16_t port_id;
+        uint16_t tcp_port;
+
+        Impl(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
+    };
+
+public:
+    DPDKGPUTCPStream(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
+    {
+    }
+
+    virtual void start();
+    virtual void stop();
+
+    virtual bool put(rte_mbuf** v, size_t count);
+
+    virtual size_t get(rte_mbuf** vp, size_t max);
+
+    virtual size_t count();
+
+    rte_mbuf* alloc_ack_mbuf();
+    rte_mbuf* clone_ack_mbuf(rte_mbuf* tmp);
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
 #endif
 
 #if defined(LNG_WITH_DOCA)

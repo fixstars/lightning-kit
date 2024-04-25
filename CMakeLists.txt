@@ -136,6 +136,14 @@ if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
       ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
     )
     target_link_libraries(test_dpdk_gpu_build_frame_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
+    add_executable(test_dpdk_gpu_build_frame_tcp test/dpdk_gpu_build_frame_tcp.cc)
+    target_include_directories(
+      test_dpdk_gpu_build_frame_tcp 
+      PRIVATE 
+      ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    )
+    target_link_libraries(test_dpdk_gpu_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
 if(LNG_WITH_DOCA)

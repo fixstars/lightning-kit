@@ -31,7 +31,8 @@ public:
 
     template <typename T, typename... Args,
         typename std::enable_if<!std::is_same<DPDKStream, T>::value>::type* = nullptr,
-        typename std::enable_if<!std::is_same<DPDKGPUUDPStream, T>::value>::type* = nullptr>
+        typename std::enable_if<!std::is_same<DPDKGPUUDPStream, T>::value>::type* = nullptr,
+        typename std::enable_if<!std::is_same<DPDKGPUTCPStream, T>::value>::type* = nullptr>
     std::shared_ptr<T> create_stream(Args... args)
     {
         auto stream(std::make_shared<T>(args...));
@@ -52,6 +53,17 @@ public:
 
     template <typename T, typename... Args,
         typename std::enable_if<std::is_same<DPDKGPUUDPStream, T>::value>::type* = nullptr>
+    std::shared_ptr<T> create_stream(Args... args)
+    {
+        register_runtime(Runtime::DPDKGPU);
+
+        auto stream(std::make_shared<T>(std::dynamic_pointer_cast<DPDKGPURuntime>(select_runtime(Runtime::DPDKGPU)), args...));
+        register_stream(stream);
+        return stream;
+    }
+
+    template <typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKGPUTCPStream, T>::value>::type* = nullptr>
     std::shared_ptr<T> create_stream(Args... args)
     {
         register_runtime(Runtime::DPDKGPU);
