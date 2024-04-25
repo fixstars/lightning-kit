@@ -13,6 +13,8 @@
 
 #include "lng/runtime.h"
 
+#include "lng/net-header.h"
+
 #include "log.h"
 
 namespace lng {

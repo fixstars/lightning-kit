@@ -29,6 +29,10 @@ public:
     virtual void stop() { }
 };
 
+#endif
+
+#if defined(LNG_WITH_DPDK)
+
 class DPDKGPURuntime : public Runtime {
 public:
     DPDKGPURuntime(uint16_t port_id)
@@ -49,10 +53,6 @@ private:
     rte_mempool* mbuf_pool_;
     uint16_t port_id_;
 };
-
-#endif
-
-#if defined(LNG_WITH_DPDK)
 
 class DPDKRuntime : public Runtime {
 public:

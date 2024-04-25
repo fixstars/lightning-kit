@@ -88,16 +88,16 @@ int main()
             ready_frame_stream->put(&p, 1);
         }
 
-        auto receiver(sys.create_actor<ReceiverGPU>("/frame/build/eth", 16,
+        auto receiver(sys.create_actor<ReceiverGPUUDP>("/frame/build/eth", 1,
             dpdk_stream,
             valid_payload_stream,
             ready_payload_stream));
-        auto frame_builder(sys.create_actor<FrameBuilder>("/frame/build", 17,
+        auto frame_builder(sys.create_actor<FrameBuilder>("/frame/build", 2,
             valid_payload_stream,
             ready_payload_stream,
             valid_frame_stream,
             ready_frame_stream));
-        auto frame_receiver(sys.create_actor<FrameReceiver>("/frame", 18,
+        auto frame_receiver(sys.create_actor<FrameReceiver>("/frame", 3,
             valid_frame_stream,
             ready_frame_stream,
             "recv.dat"));

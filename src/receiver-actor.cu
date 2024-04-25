@@ -1,14 +1,16 @@
 
 #include <cuda_runtime.h>
 
-#include <doca_gpunetio_dev_sem.cuh>
+// #include <doca_gpunetio_dev_sem.cuh>
 
 #include <rte_gpudev.h>
 
 #include <stdio.h>
 #include <vector>
 
-#include "lng/doca-util.h"
+#include "lng/net-header.h"
+
+// #include "lng/doca-util.h"
 
 namespace lng {
 
@@ -102,10 +104,8 @@ __global__ void cuda_kernel_makeframe(
 
     uint32_t cur_ackn;
 
-    doca_error_t ret;
-    struct doca_gpu_buf* buf_ptr;
-    struct pay_info* pay_info_global;
-    struct fr_info* fr_global;
+    // doca_error_t ret;
+    // struct fr_info* fr_global;
     struct eth_ip_udp_hdr* hdr;
     uintptr_t buf_addr;
     __shared__ uint32_t comm_list_idx;
@@ -132,7 +132,7 @@ __global__ void cuda_kernel_makeframe(
 
     __syncthreads();
 
-    __shared__ enum doca_gpu_semaphore_status status_frame;
+    // __shared__ enum doca_gpu_semaphore_status status_frame;
 
     // size_t heart_beat = 0;
 
@@ -151,7 +151,6 @@ __global__ void cuda_kernel_makeframe(
         while (true) {
 
             struct rte_gpu_comm_list* cur_comm_list = &comm_list[(comm_list_idx + threadIdx.x) % comm_list_entries];
-
             rte_gpu_comm_list_status* p_status = &(cur_comm_list->status_d[0]);
             auto num_pkts = cur_comm_list->num_pkts;
 
@@ -161,6 +160,7 @@ __global__ void cuda_kernel_makeframe(
                 packet_reached_thidx = 0;
                 num_pkts = 0;
             }
+            __threadfence();
 
             uint16_t local_max = warpMax(packet_reached_thidx);
             auto local_offset = warpAcc(num_pkts, lane_id);
@@ -190,10 +190,6 @@ __global__ void cuda_kernel_makeframe(
                 payloads[local_offset + pkt] = cur_comm_list->pkt_list[pkt].addr;
             }
 
-            if (packet_reached_thidx > 0)
-                *p_status = RTE_GPU_COMM_LIST_FREE;
-            __threadfence();
-
             rx_buf_idx_head = 0;
             rx_buf_idx_tail = offset_share[warpSize - 1];
 
@@ -222,7 +218,6 @@ __global__ void cuda_kernel_makeframe(
         __syncthreads();
 
         if (threadIdx.x == 0) {
-            comm_list_idx = (comm_list_idx + packet_reached_thidx_share[0]) % comm_list_entries;
             if (is_head_copy)
                 cudaMemcpyAsync(cur_tar_buf, tmp_buf, frame_head, cudaMemcpyDeviceToDevice);
             // if (heart_beat % 50 == 0) {
@@ -310,8 +305,14 @@ __global__ void cuda_kernel_makeframe(
         //     __syncthreads();
         // }
         __syncthreads();
+        if (threadIdx.x < packet_reached_thidx_share[0]) {
+            struct rte_gpu_comm_list* cur_comm_list = &comm_list[(comm_list_idx + threadIdx.x) % comm_list_entries];
+            cur_comm_list->status_d[0] = RTE_GPU_COMM_LIST_FREE;
+        }
+        __threadfence();
 
         if (warp_id == 1 && lane_id == 0) {
+            comm_list_idx = (comm_list_idx + packet_reached_thidx_share[0]) % comm_list_entries;
             uint64_t bytes = (next_prev_ackn - prev_ackn);
             // printf("%" PRIu64 " frame_head\n", frame_head);
             // printf("%" PRIu64 " cur_ackn_fin\n", cur_ackn);
@@ -352,7 +353,7 @@ __global__ void cuda_kernel_makeframe(
 }
 void init_dpdk_udp_framebuilding_kernels(std::vector<cudaStream_t>& streams)
 {
-    cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
+    cuda_kernel_makeframe<<<1, 32>>>(
         nullptr, 0, nullptr,
         nullptr, 0,
         // 0, nullptr,

@@ -13,9 +13,9 @@ namespace lng {
 
 struct semaphore;
 
-class ReceiverGPU : public Actor {
+class ReceiverGPUUDP : public Actor {
 public:
-    ReceiverGPU(const std::string& id,
+    ReceiverGPUUDP(const std::string& id,
         int cpu_id,
         const std::shared_ptr<DPDKGPUUDPStream>& dpdk_st,
         const std::shared_ptr<Queueable<Payload*>>& valid,

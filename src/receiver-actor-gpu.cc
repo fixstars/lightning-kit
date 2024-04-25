@@ -4,18 +4,19 @@
 #include <rte_mbuf.h>
 #include <rte_tcp.h>
 
-#include <doca_gpunetio.h>
+// #include <doca_gpunetio.h>
 
 #include <cuda_runtime_api.h>
 
 #include "lng/doca-kernels.h" // temporary
-#include "lng/doca-util.h" // temporary
+// #include "lng/doca-util.h" // temporary
+#include "lng/net-header.h"
 #include "lng/receiver-actor-gpu.h"
 
 #include "log.h"
 namespace lng {
 
-void ReceiverGPU::setup()
+void ReceiverGPUUDP::setup()
 {
     init_dpdk_udp_framebuilding_kernels(streams_);
 
@@ -56,7 +57,7 @@ void ReceiverGPU::setup()
         streams_);
 }
 
-void ReceiverGPU::main()
+void ReceiverGPUUDP::main()
 {
     // if (!payload_) {
     //     if (!ready_payload_stream_->get(&payload_, 1)) {
@@ -73,6 +74,8 @@ void ReceiverGPU::main()
         return;
     }
 
+    // log::info("{} comm_list_idx_", comm_list_idx_);
+
     rte_gpu_comm_populate_list_pkts(comm_list_ + (comm_list_idx_ % num_entries), v, nb);
     mbufs_num.at(comm_list_idx_ % num_entries) = nb;
 
@@ -88,7 +91,10 @@ void ReceiverGPU::main()
             break;
         }
 
-        // log::info("{} {} {} num", comm_list_free_idx_, comm_list_idx_, mbufs_num.at(comm_list_free_idx_ % num_entries));
+        static int hoge = -1;
+        hoge++;
+        if (hoge % 100 == 0)
+            log::info("{} {} {} num", comm_list_free_idx_, comm_list_idx_, mbufs_num.at(comm_list_free_idx_ % num_entries));
         rte_pktmbuf_free_bulk(mbufs.at(comm_list_free_idx_ % num_entries).get(), mbufs_num.at(comm_list_free_idx_ % num_entries));
         rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
         comm_list_free_idx_++;
