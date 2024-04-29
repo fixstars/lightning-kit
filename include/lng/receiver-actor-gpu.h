@@ -117,5 +117,6 @@ private:
 
     uint8_t* tar_bufs_;
     uint8_t* tmp_buf_;
+    uint32_t* seqn_;
 };
 }

@@ -448,7 +448,7 @@ __device__ void print_header_cuda(uint8_t* ack)
 //     // print_header_cuda<<<1, 1>>>(ack);
 // }
 
-__device__ void make_tcp_headers(uint8_t* ack, uint8_t* org, uint8_t tcp_flags, int len)
+__device__ uint32_t make_tcp_headers(uint8_t* ack, uint8_t* org, uint8_t tcp_flags, int len)
 {
     memcpy(ack, org, sizeof(struct ether_hdr) + sizeof(struct ipv4_hdr) + sizeof(struct tcp_hdr));
 
@@ -473,6 +473,7 @@ __device__ void make_tcp_headers(uint8_t* ack, uint8_t* org, uint8_t tcp_flags, 
     ack_tcp->recv_ack = BYTE_SWAP32(ackn);
     ack_tcp->tcp_flags = tcp_flags;
 
+    return ackn;
     // print_header_cuda(ack);
 }
 
@@ -531,7 +532,9 @@ __global__ void cuda_kernel_tcp_ack(
             uint8_t* org = (uint8_t*)cur_comm_list->pkt_list[0].addr;
             uint8_t* ack = (uint8_t*)cur_comm_list_ack->pkt_list[0].addr;
 
-            make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG, 0);
+            auto seqn = make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG, 0);
+            // printf("%d comm_list_ack_idx\n", comm_list_ack_idx);
+            // printf("%u ACK\n", seqn);
 
             cur_comm_list_ack->status_d[0] = RTE_GPU_COMM_LIST_FREE;
             *p_status = RTE_GPU_COMM_LIST_FREE;
@@ -546,6 +549,7 @@ __global__ void cuda_kernel_tcp_ack(
 __global__ void cuda_kernel_3way_handshake(
     struct rte_gpu_comm_list* comm_list_recv, int comm_list_entries,
     struct rte_gpu_comm_list* comm_list_ack, int comm_list_ack_entries,
+    uint32_t* seqn,
     uint32_t* quit_flag_ptr, bool is_warmup)
 {
     if (is_warmup) {
@@ -565,7 +569,7 @@ __global__ void cuda_kernel_3way_handshake(
             uint8_t* org = (uint8_t*)cur_comm_list->pkt_list[0].addr;
             uint8_t* ack = (uint8_t*)cur_comm_list_ack->pkt_list[0].addr;
 
-            make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG, 1);
+            *seqn = make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG | RTE_TCP_SYN_FLAG, 1);
             printf("send SYN ACK\n");
 
             cur_comm_list_ack->status_d[0] = RTE_GPU_COMM_LIST_FREE;
@@ -581,6 +585,7 @@ __global__ void cuda_kernel_tcp_makeframe(
     uint8_t* tar_buf, size_t frame_size,
     uint8_t* tmp_buf,
     struct rte_gpu_comm_list* comm_list, int comm_list_entries,
+    uint32_t* seqn,
     // uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
     uint32_t* quit_flag_ptr, bool is_warmup, int id)
 {
@@ -627,7 +632,8 @@ __global__ void cuda_kernel_tcp_makeframe(
 
     frame_head = 0;
     if (threadIdx.x == 0) {
-        prev_ackn = 0;
+        prev_ackn = *seqn;
+        printf("%d prev_ackn\n", prev_ackn);
         next_prev_ackn = 0;
         packet_reached = false;
         cur_tar_buf = nullptr;
@@ -776,6 +782,10 @@ __global__ void cuda_kernel_tcp_makeframe(
                 uint32_t offset = sent_seq - prev_ackn;
                 uint64_t cur_head = frame_head + offset;
 
+                if (idx == rx_buf_idx_tail - 1) {
+                    next_prev_ackn = sent_seq + total_payload_size;
+                }
+
                 if (cur_head + total_payload_size <= frame_size) {
                     uint32_t write_byte = total_payload_size;
                     uint8_t* data_head = cur_tar_buf + cur_head;
@@ -862,6 +872,7 @@ void init_dpdk_tcp_framebuilding_kernels(std::vector<cudaStream_t>& streams)
     cuda_kernel_3way_handshake<<<1, 32>>>(
         nullptr, 0,
         nullptr, 0,
+        nullptr,
         nullptr, true);
 
     cuda_kernel_tcp_ack<<<1, 32>>>(
@@ -873,6 +884,7 @@ void init_dpdk_tcp_framebuilding_kernels(std::vector<cudaStream_t>& streams)
         nullptr, 0, nullptr,
         nullptr, 0,
         // 0, nullptr,
+        nullptr,
         nullptr, true, 0);
 
     streams.resize(2);
@@ -881,21 +893,30 @@ void init_dpdk_tcp_framebuilding_kernels(std::vector<cudaStream_t>& streams)
     cudaStreamCreate(&streams[1]);
 }
 
+void cpu_3way_handshake(
+    struct rte_gpu_comm_list* comm_list_recv, int comm_list_recv_entries,
+    struct rte_gpu_comm_list* comm_list_ack, int comm_list_ack_entries,
+    uint32_t* quit_flag_ptr,
+    uint32_t* seqn)
+{
+    cuda_kernel_3way_handshake<<<1, 32>>>(
+        comm_list_recv, comm_list_recv_entries,
+        comm_list_ack, comm_list_ack_entries,
+        seqn,
+        quit_flag_ptr, false);
+}
+
 void launch_dpdk_tcp_framebuilding_kernels(
     struct rte_gpu_comm_list* comm_list, int comm_list_entries,
     struct rte_gpu_comm_list* comm_list_recv, int comm_list_recv_entries,
     struct rte_gpu_comm_list* comm_list_ack, int comm_list_ack_entries,
     // struct semaphore* sem_fr,
     uint32_t* quit_flag_ptr,
+    uint32_t* seqn,
     uint8_t* tar_buf, size_t frame_size,
     uint8_t* tmp_buf,
     std::vector<cudaStream_t>& streams)
 {
-
-    cuda_kernel_3way_handshake<<<1, 32, 0, streams.at(1)>>>(
-        comm_list_recv, comm_list_recv_entries,
-        comm_list_ack, comm_list_ack_entries,
-        quit_flag_ptr, false);
 
     cuda_kernel_tcp_ack<<<1, 32, 0, streams.at(1)>>>(
         comm_list_recv, comm_list_recv_entries,
@@ -907,6 +928,7 @@ void launch_dpdk_tcp_framebuilding_kernels(
         tmp_buf,
         comm_list, comm_list_entries,
         // sem_fr->sem_num, sem_fr->sem_gpu,
+        seqn,
         quit_flag_ptr,
         false, 0);
 }

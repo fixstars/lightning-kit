@@ -164,6 +164,7 @@ void ReceiverGPUTCP::setup()
 
     ack_thread.reset(new std::thread([=]() {
         size_t idx = 0;
+        bool is_3way_handshake = true; // TODO
         while (true) {
             rte_gpu_comm_list_status status;
             struct rte_gpu_comm_list* cur_comm = comm_list_ack_pkt_ + (idx % num_ack_entries);
@@ -185,7 +186,9 @@ void ReceiverGPUTCP::setup()
             rte_pktmbuf_free(comm_list_ack_ref_[idx % num_ack_entries].mbufs[0]);
             rte_gpu_comm_cleanup_list(comm_list_ack_ref_ + (idx % num_ack_entries));
 
-            idx++;
+            if (!is_3way_handshake)
+                idx++;
+            is_3way_handshake = false;
         }
     }));
 
@@ -194,6 +197,9 @@ void ReceiverGPUTCP::setup()
 
     cudaMalloc((void**)&tar_bufs_, FRAME_SIZE * FRAME_NUM);
     cudaMalloc((void**)&tmp_buf_, TMP_FRAME_SIZE);
+    cudaMalloc((void**)&seqn_, sizeof(uint32_t));
+
+    wait_3wayhandshake();
 
     launch_dpdk_tcp_framebuilding_kernels(
         comm_list_, num_entries,
@@ -201,15 +207,20 @@ void ReceiverGPUTCP::setup()
         comm_list_ack_pkt_, num_ack_entries,
         // sem_fr.get(),
         quit_flag_->ptr,
+        seqn_,
         tar_bufs_, FRAME_SIZE,
         tmp_buf_,
         streams_);
-
-    wait_3wayhandshake();
 }
 
 void ReceiverGPUTCP::wait_3wayhandshake()
 {
+    cpu_3way_handshake(
+        comm_list_ack_ref_, num_ack_entries,
+        comm_list_ack_pkt_, num_ack_entries,
+        quit_flag_->ptr,
+        seqn_);
+
     rte_mbuf* v[16];
     while (true) {
         int nb;
@@ -231,6 +242,7 @@ void ReceiverGPUTCP::wait_3wayhandshake()
         break;
     }
     log::info("ACK");
+    cudaDeviceSynchronize();
 }
 
 void ReceiverGPUTCP::main()
