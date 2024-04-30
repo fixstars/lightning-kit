@@ -114,6 +114,14 @@ void ReceiverGPUUDP::main()
     // payload_ = nullptr;
 }
 
+static inline void set_affinity(int cpu_id)
+{
+    cpu_set_t my_set;
+    CPU_ZERO(&my_set);
+    CPU_SET(cpu_id, &my_set);
+    sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
+}
+
 void ReceiverGPUTCP::setup()
 {
     init_dpdk_tcp_framebuilding_kernels(streams_);
@@ -165,6 +173,7 @@ void ReceiverGPUTCP::setup()
     ack_thread.reset(new std::thread([=]() {
         size_t idx = 0;
         bool is_3way_handshake = true; // TODO
+        set_affinity(0);
         while (true) {
             rte_gpu_comm_list_status status;
             struct rte_gpu_comm_list* cur_comm = comm_list_ack_pkt_ + (idx % num_ack_entries);
@@ -262,7 +271,7 @@ void ReceiverGPUTCP::main()
         return;
     }
 
-    log::info("{} comm_list_idx_", comm_list_idx_);
+    log::info("{} {} comm_list_idx_", comm_list_idx_, nic_stream_->count());
 
     rte_mbuf* ack_ref = nic_stream_->clone_ack_mbuf(v[nb - 1]);
     rte_gpu_comm_populate_list_pkts(comm_list_ack_ref_ + (comm_list_idx_ % num_ack_entries), &ack_ref, 1);
