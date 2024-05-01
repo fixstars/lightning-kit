@@ -534,7 +534,7 @@ __global__ void cuda_kernel_tcp_ack(
 
             auto seqn = make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG, 0);
             // printf("%d comm_list_ack_idx\n", comm_list_ack_idx);
-            printf("%u ACK\n", seqn);
+            // printf("%u ACK\n", seqn);
 
             cur_comm_list_ack->status_d[0] = RTE_GPU_COMM_LIST_FREE;
             *p_status = RTE_GPU_COMM_LIST_FREE;

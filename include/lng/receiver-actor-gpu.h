@@ -94,7 +94,7 @@ private:
     std::vector<cudaStream_t> streams_;
 
     static constexpr int num_entries = 1024;
-    static constexpr int num_ack_entries = 512;
+    static constexpr int num_ack_entries = 1024;
     size_t comm_list_idx_;
     size_t comm_list_free_idx_;
     std::vector<std::shared_ptr<rte_mbuf*>> mbufs;

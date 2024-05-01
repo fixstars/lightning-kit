@@ -81,7 +81,7 @@ void DPDKGPURuntime::start()
     }
 
     // Allocates mempool to hold the mbufs
-    constexpr uint32_t n = 8192 - 1;
+    constexpr uint32_t n = 8192 * 2 - 1;
     constexpr uint32_t cache_size = 256;
     constexpr uint32_t data_room_size = RTE_PKTMBUF_HEADROOM + 10 * 1024;
 

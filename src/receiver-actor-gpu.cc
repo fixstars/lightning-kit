@@ -152,17 +152,8 @@ void ReceiverGPUTCP::setup()
     ack_tmp_mbufs_.resize(num_ack_entries);
 
     for (int i = 0; i < num_ack_entries; ++i) {
-        ack_tmp_mbufs_.at(i) = nic_stream_->alloc_ack_mbuf();
-        auto buf = ack_tmp_mbufs_.at(i);
-        buf->packet_type = RTE_PTYPE_L2_ETHER | RTE_PTYPE_L3_IPV4 | RTE_PTYPE_L4_TCP;
-        buf->ol_flags = RTE_MBUF_F_TX_IPV4 | RTE_MBUF_F_TX_IP_CKSUM | RTE_MBUF_F_TX_TCP_CKSUM | RTE_MBUF_F_EXTERNAL;
-        buf->l2_len = sizeof(struct ether_hdr);
-        buf->l3_len = sizeof(struct ipv4_hdr);
-        buf->l4_len = sizeof(struct tcp_hdr);
-        uint8_t* head = reinterpret_cast<uint8_t*>(rte_pktmbuf_append(buf, buf->l2_len + buf->l3_len + buf->l4_len));
-
-        rte_mbuf* tmp = nic_stream_->clone_ack_mbuf(ack_tmp_mbufs_.at(i));
-        rte_gpu_comm_populate_list_pkts(comm_list_ack_pkt_ + i, &tmp, 1);
+        auto buf = nic_stream_->alloc_ack_mbuf();
+        rte_gpu_comm_populate_list_pkts(comm_list_ack_pkt_ + i, &buf, 1);
 
         // log::info("{} num_ack_en", i);
         // set_header_cpu(rte_pktmbuf_mtod_offset(buf, uint8_t*, 0));
@@ -182,17 +173,18 @@ void ReceiverGPUTCP::setup()
                 continue;
             }
 
-            log::info("tx");
+            // log::info("{} tx", idx);
 
             nic_stream_->put(cur_comm->mbufs, 1);
             rte_wmb();
+            // rte_pktmbuf_free(cur_comm->mbufs[0]);
 
             rte_gpu_comm_cleanup_list(cur_comm);
 
-            rte_mbuf* new_tmp = nic_stream_->clone_ack_mbuf(ack_tmp_mbufs_.at((idx % num_ack_entries)));
+            rte_mbuf* new_tmp = nic_stream_->alloc_ack_mbuf();
             rte_gpu_comm_populate_list_pkts(cur_comm, &new_tmp, 1);
 
-            rte_pktmbuf_free(comm_list_ack_ref_[idx % num_ack_entries].mbufs[0]);
+            // rte_pktmbuf_free(comm_list_ack_ref_[idx % num_ack_entries].mbufs[0]);
             rte_gpu_comm_cleanup_list(comm_list_ack_ref_ + (idx % num_ack_entries));
 
             if (!is_3way_handshake)
@@ -267,16 +259,20 @@ void ReceiverGPUTCP::main()
 
     rte_mbuf** v = mbufs.at(comm_list_idx_ % num_entries).get();
 
+    // static int prev = nic_stream_->count();
+
     if ((nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE)) == 0) {
         return;
     }
 
-    log::info("{} {} comm_list_idx_", comm_list_idx_, nic_stream_->count());
+    // auto prev_clone = nic_stream_->count();
 
-    rte_mbuf* ack_ref = nic_stream_->clone_ack_mbuf(v[nb - 1]);
+    rte_mbuf* ack_ref = v[nb - 1]; // nic_stream_->clone_ack_mbuf(v[nb - 1]);
     rte_gpu_comm_populate_list_pkts(comm_list_ack_ref_ + (comm_list_idx_ % num_ack_entries), &ack_ref, 1);
     rte_gpu_comm_populate_list_pkts(comm_list_ + (comm_list_idx_ % num_entries), v, nb);
-    mbufs_num.at(comm_list_idx_ % num_entries) = nb;
+    // mbufs_num.at(comm_list_idx_ % num_entries) = nb;
+
+    // log::info("{} {} {} {} {} comm_list_idx_", comm_list_idx_, prev, prev_clone, nic_stream_->count(), nb);
 
     comm_list_idx_++;
 
@@ -290,14 +286,16 @@ void ReceiverGPUTCP::main()
             break;
         }
 
-        static int hoge = -1;
-        hoge++;
-        if (hoge % 100 == 0)
-            log::info("{} {} {} num", comm_list_free_idx_, comm_list_idx_, mbufs_num.at(comm_list_free_idx_ % num_entries));
-        rte_pktmbuf_free_bulk(mbufs.at(comm_list_free_idx_ % num_entries).get(), mbufs_num.at(comm_list_free_idx_ % num_entries));
+        // static int hoge = -1;
+        // hoge++;
+        // if (hoge % 100 == 0)
+        // log::info("{} {} {} {} num", comm_list_free_idx_, comm_list_idx_, comm_list_[comm_list_free_idx_ % num_entries].num_pkts, nic_stream_->count());
+        rte_pktmbuf_free_bulk(comm_list_[comm_list_free_idx_ % num_entries].mbufs, comm_list_[comm_list_free_idx_ % num_entries].num_pkts);
         rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
         comm_list_free_idx_++;
     }
+
+    // prev = nic_stream_->count();
 
     // if (!nic_stream_->check_target_packet(v)) {
     //     return;

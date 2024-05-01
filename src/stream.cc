@@ -5,6 +5,7 @@
 #include <rte_net.h>
 #endif
 
+#include "lng/net-header.h"
 #include "lng/runtime.h"
 #include "lng/stream.h"
 
@@ -640,7 +641,15 @@ size_t DPDKGPUTCPStream::count()
 
 rte_mbuf* DPDKGPUTCPStream::alloc_ack_mbuf()
 {
-    return rte_pktmbuf_alloc(impl_->rt->get_mempool());
+    auto buf = rte_pktmbuf_alloc(impl_->rt->get_mempool());
+    buf->packet_type |= RTE_PTYPE_L2_ETHER | RTE_PTYPE_L3_IPV4 | RTE_PTYPE_L4_TCP;
+    buf->ol_flags |= RTE_MBUF_F_TX_IPV4 | RTE_MBUF_F_TX_IP_CKSUM | RTE_MBUF_F_TX_TCP_CKSUM;
+    buf->l2_len = sizeof(struct ether_hdr);
+    buf->l3_len = sizeof(struct ipv4_hdr);
+    buf->l4_len = sizeof(struct tcp_hdr);
+    uint8_t* head = reinterpret_cast<uint8_t*>(rte_pktmbuf_append(buf, buf->l2_len + buf->l3_len + buf->l4_len));
+
+    return buf;
     // return rte_eth_rx_queue_count(impl_->port_id, 0);
 }
 
