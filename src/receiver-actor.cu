@@ -28,6 +28,18 @@ __inline__ __device__ T warpMax(T localMax)
 }
 
 template <typename T>
+__inline__ __device__ T warpSum(T localMax)
+{
+    localMax += __shfl_xor_sync(0xffffffff, localMax, 16);
+    localMax += __shfl_xor_sync(0xffffffff, localMax, 8);
+    localMax += __shfl_xor_sync(0xffffffff, localMax, 4);
+    localMax += __shfl_xor_sync(0xffffffff, localMax, 2);
+    localMax += __shfl_xor_sync(0xffffffff, localMax, 1);
+
+    return localMax;
+}
+
+template <typename T>
 __inline__ __device__ T warpAcc(T sum, int lane_id)
 {
     auto local = __shfl_up_sync(0xffffffff, sum, 1);
@@ -521,18 +533,28 @@ __global__ void cuda_kernel_tcp_ack(
     size_t comm_list_idx = 0;
     size_t comm_list_ack_idx = 0;
 
+    uint32_t seqn = 0;
+    // size_t heart_beat = 0;
+
     while ((*quit_flag_ptr == 0) && threadIdx.x == 0) {
         struct rte_gpu_comm_list* cur_comm_list = &comm_list_recv[(comm_list_idx) % comm_list_entries];
         rte_gpu_comm_list_status* p_status = &(cur_comm_list->status_d[0]);
         rte_gpu_comm_list_status is_ready = *p_status;
         __threadfence();
+
+        // if (heart_beat % ((size_t)100000) == 0) {
+        //     printf("%lld comm_list_idx\n", comm_list_idx);
+        //     printf("%u latest seqn\n", seqn);
+        // }
+        // heart_beat++;
+
         if (is_ready == RTE_GPU_COMM_LIST_READY) {
 
             struct rte_gpu_comm_list* cur_comm_list_ack = &comm_list_ack[(comm_list_ack_idx) % comm_list_ack_entries];
             uint8_t* org = (uint8_t*)cur_comm_list->pkt_list[0].addr;
             uint8_t* ack = (uint8_t*)cur_comm_list_ack->pkt_list[0].addr;
 
-            auto seqn = make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG, 0);
+            seqn = make_tcp_headers(ack, org, RTE_TCP_ACK_FLAG, 0);
             // printf("%d comm_list_ack_idx\n", comm_list_ack_idx);
             // printf("%u ACK\n", seqn);
 
@@ -581,6 +603,9 @@ __global__ void cuda_kernel_3way_handshake(
     }
 }
 
+#define MAX_TCP_THREAD_NUM (512)
+#define MAX_TCP_WARP_NUM (MAX_TCP_THREAD_NUM / 32)
+
 __global__ void cuda_kernel_tcp_makeframe(
     uint8_t* tar_buf, size_t frame_size,
     uint8_t* tmp_buf,
@@ -605,8 +630,7 @@ __global__ void cuda_kernel_tcp_makeframe(
     __shared__ int64_t rx_buf_idx_tail;
 
     __shared__ bool packet_reached;
-    __shared__ uint16_t packet_reached_thidx_share[MAX_WARP_NUM];
-    __shared__ uint32_t offset_share[MAX_WARP_NUM];
+    __shared__ uint16_t packet_reached_thidx_share[MAX_TCP_WARP_NUM];
     uint16_t packet_reached_thidx = 0;
 
     __shared__ uint64_t frame_head;
@@ -615,7 +639,7 @@ __global__ void cuda_kernel_tcp_makeframe(
 
     __shared__ uint8_t* cur_tar_buf;
 
-    __shared__ uintptr_t payloads[NUM_PAYLOADS];
+    __shared__ struct rte_gpu_comm_list* comm_list_addr[1024];
 
     uint32_t cur_ackn;
 
@@ -658,56 +682,37 @@ __global__ void cuda_kernel_tcp_makeframe(
     size_t bytes_local = 0;
     while ((!quit) && (*quit_flag_ptr == 0)) {
 
-        // if (threadIdx.x == 0 && (heart_beat % ((size_t)100) == 0)) {
-        //     printf("heartbeat frame %d\n", threadIdx.x);
-        // }
-        // heart_beat++;
-
         // auto cl_start = clock();
         while (true) {
 
+            // if (threadIdx.x == 0 && (heart_beat % ((size_t)1000) == 0)) {
+            //     printf("heartbeat frame %d\n", threadIdx.x);
+            // }
+            // heart_beat++;
+
             struct rte_gpu_comm_list* cur_comm_list = &comm_list[(comm_list_idx + threadIdx.x) % comm_list_entries];
             rte_gpu_comm_list_status* p_status = &(cur_comm_list->status_d[0]);
-            auto num_pkts = cur_comm_list->num_pkts;
 
             if (*p_status == RTE_GPU_COMM_LIST_READY) {
                 packet_reached_thidx = threadIdx.x + 1;
+                comm_list_addr[threadIdx.x] = cur_comm_list;
             } else {
                 packet_reached_thidx = 0;
-                num_pkts = 0;
             }
             __threadfence();
 
             uint16_t local_max = warpMax(packet_reached_thidx);
-            auto local_offset = warpAcc(num_pkts, lane_id);
 
             if (lane_id == warpSize - 1) {
                 packet_reached_thidx_share[warp_id] = local_max;
-                offset_share[warp_id] = local_offset;
             }
             __syncthreads();
 
             if (threadIdx.x < warpSize) {
-                local_max = threadIdx.x < MAX_WARP_NUM ? packet_reached_thidx_share[threadIdx.x] : 0;
-                auto tmp = threadIdx.x < MAX_WARP_NUM ? offset_share[threadIdx.x] : 0;
+                local_max = threadIdx.x < MAX_TCP_WARP_NUM ? packet_reached_thidx_share[threadIdx.x] : 0;
                 packet_reached_thidx_share[0] = warpMax(local_max);
-                offset_share[threadIdx.x] = warpAcc(tmp, lane_id);
             }
-
             __syncthreads();
-
-            local_offset += (warp_id == 0 ? 0 : offset_share[warp_id - 1]);
-            {
-                auto tmp = __shfl_up_sync(0xffffffff, local_offset, 1);
-                local_offset = threadIdx.x == 0 ? 0 : (lane_id == 0 ? offset_share[warp_id - 1] : tmp);
-            }
-
-            for (int pkt = 0; pkt < num_pkts; ++pkt) {
-                payloads[local_offset + pkt] = cur_comm_list->pkt_list[pkt].addr;
-            }
-
-            rx_buf_idx_head = 0;
-            rx_buf_idx_tail = offset_share[warpSize - 1];
 
             if (packet_reached_thidx_share[0] > 0) {
                 break;
@@ -747,17 +752,58 @@ __global__ void cuda_kernel_tcp_makeframe(
             // }
         }
 
-        int64_t pkt_num = rx_buf_idx_tail - rx_buf_idx_head;
-        int64_t pkt_remain = pkt_num % blockDim.x;
-        int64_t pkt_num_local = pkt_num / blockDim.x;
-        int64_t rx_buf_st = pkt_num_local * threadIdx.x;
-        if (threadIdx.x < pkt_remain) {
-            rx_buf_st += threadIdx.x;
-            pkt_num_local++;
+        auto commlist_num = packet_reached_thidx_share[0];
+        int64_t ceil = (blockDim.x + commlist_num - 1) / commlist_num;
+        int64_t floor = blockDim.x / commlist_num;
+        int64_t remain = blockDim.x % commlist_num;
+        // struct rte_gpu_comm_list* assign_commlist;
+        int64_t pkt_offset;
+        int64_t pkt_num;
+        int64_t commlist_id;
+        // if (threadIdx.x == 0) {
+        //     printf("%d commlist_num\n", commlist_num);
+        // }
+
+        if (threadIdx.x < remain * ceil) {
+            commlist_id = threadIdx.x / ceil;
+            auto assign_commlist = comm_list_addr[commlist_id];
+            auto num_pkts = assign_commlist->num_pkts;
+            pkt_num = num_pkts / ceil;
+            auto pkt_remain = num_pkts % ceil;
+            auto base_th_id = ceil * (threadIdx.x / ceil);
+            auto relative_th_id = threadIdx.x - base_th_id;
+            pkt_offset = pkt_num * relative_th_id;
+            if (relative_th_id < pkt_remain) {
+                pkt_num++;
+                pkt_offset += relative_th_id;
+            } else {
+                pkt_offset += pkt_remain;
+            }
+        } else if (floor > 0) {
+            auto relative_th = threadIdx.x - remain * ceil;
+            commlist_id = relative_th / floor + remain;
+            auto assign_commlist = comm_list_addr[commlist_id];
+            auto num_pkts = assign_commlist->num_pkts;
+            pkt_num = num_pkts / floor;
+            auto pkt_remain = num_pkts % floor;
+            auto base_th_id = floor * (relative_th / floor);
+            auto relative_th_id = relative_th - base_th_id;
+            pkt_offset = pkt_num * relative_th_id;
+            if (relative_th_id < pkt_remain) {
+                pkt_num++;
+                pkt_offset += relative_th_id;
+            } else {
+                pkt_offset += pkt_remain;
+            }
         } else {
-            rx_buf_st += pkt_remain;
+            commlist_id = 0;
+            pkt_num = 0;
+            pkt_offset = 0;
         }
-        rx_buf_st += rx_buf_idx_head;
+
+        // printf("%d commlist_id\n", commlist_id);
+        // printf("%d pkt_offset\n", pkt_offset);
+        // printf("%d pkt_num\n", pkt_num);
 
         // if (threadIdx.x == 0) {
         //     printf("%d rx_buf_st st\n", rx_buf_st);
@@ -773,8 +819,8 @@ __global__ void cuda_kernel_tcp_makeframe(
 
         if (cur_tar_buf) {
             bool is_printed = false;
-            for (int64_t idx = rx_buf_st; idx < rx_buf_st + pkt_num_local; ++idx) {
-                raw_to_tcp(payloads[idx], &hdr, &payload);
+            for (int64_t idx = pkt_offset; idx < pkt_offset + pkt_num; ++idx) {
+                raw_to_tcp(comm_list_addr[commlist_id]->pkt_list[idx].addr, &hdr, &payload);
                 volatile uint32_t raw_sent_seq = hdr->l4_hdr.sent_seq;
                 uint32_t sent_seq = BYTE_SWAP32(raw_sent_seq);
                 uint32_t total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
@@ -782,7 +828,7 @@ __global__ void cuda_kernel_tcp_makeframe(
                 uint32_t offset = sent_seq - prev_ackn;
                 uint64_t cur_head = frame_head + offset;
 
-                if (idx == rx_buf_idx_tail - 1) {
+                if (commlist_id == commlist_num - 1 && idx == pkt_offset + pkt_num - 1) {
                     next_prev_ackn = sent_seq + total_payload_size;
                 }
 
@@ -923,7 +969,7 @@ void launch_dpdk_tcp_framebuilding_kernels(
         comm_list_ack, comm_list_ack_entries,
         quit_flag_ptr, false);
 
-    cuda_kernel_tcp_makeframe<<<1, MAX_THREAD_NUM, 0, streams.at(0)>>>(
+    cuda_kernel_tcp_makeframe<<<1, MAX_TCP_THREAD_NUM, 0, streams.at(0)>>>(
         tar_buf, frame_size,
         tmp_buf,
         comm_list, comm_list_entries,

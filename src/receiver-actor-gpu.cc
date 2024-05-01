@@ -136,9 +136,9 @@ void ReceiverGPUTCP::setup()
     quit_flag_.reset(new struct rte_gpu_comm_flag);
 
     mbufs.resize(num_entries);
-#define PACKT_NUM_AT_ONCE 4096
+#define TCP_PACKT_NUM_AT_ONCE 64
     for (auto& mbuf : mbufs) {
-        mbuf.reset(new rte_mbuf*[PACKT_NUM_AT_ONCE]);
+        mbuf.reset(new rte_mbuf*[TCP_PACKT_NUM_AT_ONCE]);
     }
 
     mbufs_num.resize(num_entries);
@@ -165,10 +165,17 @@ void ReceiverGPUTCP::setup()
         size_t idx = 0;
         bool is_3way_handshake = true; // TODO
         set_affinity(0);
+        // size_t heart_beat = 0;
         while (true) {
             rte_gpu_comm_list_status status;
             struct rte_gpu_comm_list* cur_comm = comm_list_ack_pkt_ + (idx % num_ack_entries);
             rte_gpu_comm_get_status(cur_comm, &status);
+
+            // if (heart_beat % ((size_t)100000) == 0) {
+            //     printf("%lld ack\n", idx);
+            // }
+            // heart_beat++;
+
             if (status == RTE_GPU_COMM_LIST_READY) {
                 continue;
             }
@@ -226,7 +233,7 @@ void ReceiverGPUTCP::wait_3wayhandshake()
     while (true) {
         int nb;
         // SYN
-        if ((nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE)) == 0) {
+        if ((nb = nic_stream_->get(v, TCP_PACKT_NUM_AT_ONCE)) == 0) {
             continue;
         }
         rte_gpu_comm_populate_list_pkts(comm_list_ack_ref_, v + nb - 1, 1);
@@ -236,7 +243,7 @@ void ReceiverGPUTCP::wait_3wayhandshake()
     while (true) {
         int nb;
         // ACK
-        if ((nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE)) == 0) {
+        if ((nb = nic_stream_->get(v, TCP_PACKT_NUM_AT_ONCE)) == 0) {
             continue;
         }
         rte_pktmbuf_free_bulk(v, nb);
@@ -261,7 +268,7 @@ void ReceiverGPUTCP::main()
 
     // static int prev = nic_stream_->count();
 
-    if ((nb = nic_stream_->get(v, PACKT_NUM_AT_ONCE)) == 0) {
+    if ((nb = nic_stream_->get(v, TCP_PACKT_NUM_AT_ONCE)) == 0) {
         return;
     }
 
@@ -273,6 +280,7 @@ void ReceiverGPUTCP::main()
     // mbufs_num.at(comm_list_idx_ % num_entries) = nb;
 
     // log::info("{} {} {} {} {} comm_list_idx_", comm_list_idx_, prev, prev_clone, nic_stream_->count(), nb);
+    // log::info("{} {} {} comm_list_idx_", comm_list_idx_, nic_stream_->count(), nb);
 
     comm_list_idx_++;
 

@@ -536,9 +536,10 @@ void DPDKGPUTCPStream::start()
         throw std::runtime_error(fmt::format("Failed to set mtu (port {}), mtu={}: {}", port_id, mtu, strerror(-ret)));
     }
 
-    uint16_t rx_desc_size = 1024;
+    uint16_t rx_desc_size = (32) * 1024;
     uint16_t tx_desc_size = 1024;
     ret = rte_eth_dev_adjust_nb_rx_tx_desc(port_id, &rx_desc_size, &tx_desc_size);
+    log::info("{} rx_desc_size", rx_desc_size);
     if (ret != 0) {
         throw std::runtime_error(fmt::format("Failed to adjust Tx/Rx description (port {}): {}", port_id, strerror(-ret)));
     }
