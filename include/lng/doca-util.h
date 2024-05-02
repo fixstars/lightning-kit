@@ -129,6 +129,10 @@ struct reply_info {
     uint8_t* eth_payload;
 };
 
+struct udp_payload_header {
+    uint32_t seqn;
+};
+
 // to be deleted
 struct store_buf_info {
     uint8_t* buf;

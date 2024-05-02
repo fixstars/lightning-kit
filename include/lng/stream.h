@@ -206,7 +206,7 @@ private:
 
 #if defined(LNG_WITH_DOCA)
 
-class DOCAUDPStream : public Stream, public Queueable<uint8_t*> {
+class DOCAUDPEchoStream : public Stream, public Queueable<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -232,7 +232,64 @@ class DOCAUDPStream : public Stream, public Queueable<uint8_t*> {
     };
 
 public:
-    DOCAUDPStream(std::string nic_addr, std::string gpu_addr)
+    DOCAUDPEchoStream(std::string nic_addr, std::string gpu_addr)
+        : impl_(new Impl(nic_addr, gpu_addr))
+    {
+    }
+
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
+
+    virtual bool put(uint8_t** v, size_t count)
+    {
+        return impl_->put(v, count);
+    }
+
+    virtual size_t get(uint8_t** vp, size_t max)
+    {
+        return impl_->get(vp, max);
+    }
+
+    virtual size_t count();
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+class DOCAUDPFrameBuilderStream : public Stream, public Queueable<uint8_t*> {
+
+    struct Impl {
+        struct doca_gpu* gpu_dev;
+        struct doca_dev* ddev;
+        struct doca_flow_port* df_port;
+        std::unique_ptr<struct rx_queue> rxq;
+        std::unique_ptr<struct tx_queue> txq;
+        std::unique_ptr<struct semaphore> sem_rx;
+        std::unique_ptr<struct semaphore> sem_fr;
+        uint32_t sem_fr_idx;
+        uint16_t port_id;
+        struct doca_flow_pipe* rxq_pipe;
+        struct doca_flow_pipe* root_pipe;
+        struct doca_flow_pipe_entry* root_udp_entry;
+
+        uint8_t* tar_buf;
+        uint8_t* tmp_buf;
+        static constexpr size_t frame_size = (size_t)512 * 1024 * 1024;
+        static constexpr size_t frame_num = 2;
+        static constexpr size_t tmp_size = (size_t)512 * 1024 * 1024;
+
+        Impl(std::string nic_addr, std::string gpu_addr);
+        ~Impl();
+        size_t get(uint8_t** vp, size_t max);
+        bool put(uint8_t** v, size_t count);
+    };
+
+public:
+    DOCAUDPFrameBuilderStream(std::string nic_addr, std::string gpu_addr)
         : impl_(new Impl(nic_addr, gpu_addr))
     {
     }

@@ -27,6 +27,10 @@
 
 namespace fs = std::filesystem;
 
+struct udp_payload_header {
+    uint32_t seqn;
+};
+
 bool g_running = true;
 void catch_int(int sig_num)
 {
@@ -91,7 +95,7 @@ public:
         const uint32_t l2_len = sizeof(struct rte_ether_hdr);
         const uint32_t l3_len = sizeof(struct rte_ipv4_hdr);
         const uint32_t l4_len = sizeof(rte_udp_hdr);
-        const uint32_t hdr_len = l2_len + l3_len + l4_len;
+        const uint32_t hdr_len = l2_len + l3_len + l4_len + sizeof(struct udp_payload_header);
         const uint16_t mss = mtu - l4_len - l3_len;
 
         std::vector<struct rte_mbuf*> bufs;
@@ -134,7 +138,7 @@ public:
             uint8_t* body = reinterpret_cast<uint8_t*>(rte_pktmbuf_append(buf, segmented_payload_size));
             memcpy(body, payload_ptr, segmented_payload_size);
 
-            uint16_t dgram_len = segmented_payload_size + sizeof(struct rte_udp_hdr);
+            uint16_t dgram_len = segmented_payload_size + sizeof(struct rte_udp_hdr) + sizeof(struct udp_payload_header);
 
             remaining -= segmented_payload_size;
             payload_ptr += segmented_payload_size;
@@ -431,7 +435,7 @@ int sending_udp_data(void* arg1)
     uint32_t itr = 0;
     int ports_num = arg->udp_pkt_maker->dst_ports_.size();
     std::vector<uint64_t> count_bytes(ports_num, 0);
-    std::vector<uint8_t> send_pkt_id(ports_num, 0);
+    std::vector<uint32_t> seqn(ports_num, 0);
 
     uint32_t num_itr = (NUM_DUP - 1 + arg->send_buf_num) / NUM_DUP;
 
@@ -452,9 +456,10 @@ int sending_udp_data(void* arg1)
                 count_bytes.at(idx) += rte_cpu_to_be_16(udp->dgram_len);
                 udp->dst_port = arg->udp_pkt_maker->dst_ports_.at(idx);
 
-                auto* body = rte_pktmbuf_mtod_offset(bs[i], uint8_t*, bs[i]->l2_len + bs[i]->l3_len + bs[i]->l4_len);
-                body[0] = send_pkt_id.at(idx);
-                send_pkt_id.at(idx)++;
+                auto* udp_custom_header = rte_pktmbuf_mtod_offset(bs[i], struct udp_payload_header*, bs[i]->l2_len + bs[i]->l3_len + bs[i]->l4_len);
+                udp_custom_header->seqn = seqn.at(idx);
+                seqn.at(idx) += rte_pktmbuf_pkt_len(bs[i]) - bs[i]->l2_len - bs[i]->l3_len - bs[i]->l4_len - sizeof(struct udp_payload_header);
+                // std::cout << idx << " " << rte_cpu_to_be_16(udp->dgram_len) << " " << udp_custom_header->seqn << " udp_custom_header->seqn" << std::endl;
                 // std::cout << bs[i]->l2_len << " " << bs[i]->l3_len << " " << bs[i]->l4_len << " l2 l3 l4" << std::endl;
                 itr++;
             }
@@ -470,6 +475,16 @@ int sending_udp_data(void* arg1)
 
             if (!g_running) {
                 break;
+            }
+
+            if (bandwidth_in_gbps) {
+                sent_in_bytes += payload_size;
+
+                auto stop_time = (8 * sent_in_bytes / (bandwidth_in_gbps * 1024.0 * 1024.0 * 1024.0)) - (std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::high_resolution_clock::now() - ts1).count() / 1000.0);
+
+                if (stop_time > 0) {
+                    usleep(static_cast<int>(stop_time * 1000 * 1000));
+                }
             }
         }
 
@@ -818,13 +833,13 @@ int main(int argc, char** argv)
         .help("specify the log level");
 
     program.add_argument("--frame_size")
-        .default_value<size_t>(256 * 1024 * 1024)
+        .default_value<size_t>(MTU - sizeof(struct rte_ipv4_hdr) - sizeof(struct rte_udp_hdr) - sizeof(struct udp_payload_header))
         .help("specify the one frame size")
         .scan<'u', size_t>();
     ;
 
     program.add_argument("--frame_num")
-        .default_value<uint32_t>(128)
+        .default_value<uint32_t>(1024 * 1024)
         .help("specify the # of frame")
         .scan<'u', uint32_t>();
 

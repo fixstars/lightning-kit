@@ -74,7 +74,7 @@ int main()
 
         System sys;
 
-        auto outer_stream(sys.create_stream<DOCAUDPEchoStream>("17:00.1", "2a:00.0"));
+        auto outer_stream(sys.create_stream<DOCAUDPFrameBuilderStream>("03:00.1", "03:02.0"));
         auto inner_stream(sys.create_stream<MemoryStream<uint8_t*>>());
 
         auto receiver(sys.create_actor<Receiver>("/receiver", 4,

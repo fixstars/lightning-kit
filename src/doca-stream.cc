@@ -36,7 +36,7 @@ put(cpu) <--semaphore--> send_kernel(gpu)
 
 */
 
-DOCAUDPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
+DOCAUDPEchoStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     : sem_fr_idx(0)
     , sem_reply_idx(0)
 {
@@ -85,11 +85,11 @@ DOCAUDPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 
     std::vector<cudaStream_t> streams;
 
-    init_udp_kernels(streams);
-    launch_udp_kernels(rxq.get(), txq.get(), tx_buf_arr.get(), sem_rx.get(), sem_fr.get(), sem_reply.get(), streams);
+    init_udp_echo_kernels(streams);
+    launch_udp_echo_kernels(rxq.get(), txq.get(), tx_buf_arr.get(), sem_rx.get(), sem_fr.get(), sem_reply.get(), streams);
 }
 
-DOCAUDPStream::Impl::~Impl()
+DOCAUDPEchoStream::Impl::~Impl()
 {
     doca_error_t result;
     // result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
@@ -103,7 +103,7 @@ DOCAUDPStream::Impl::~Impl()
     }
 }
 
-bool DOCAUDPStream::Impl::put(uint8_t** v, size_t count)
+bool DOCAUDPEchoStream::Impl::put(uint8_t** v, size_t count)
 {
     size_t ret = 0;
     struct reply_info* reply_info_global;
@@ -124,7 +124,7 @@ bool DOCAUDPStream::Impl::put(uint8_t** v, size_t count)
     return ret;
 }
 
-size_t DOCAUDPStream::Impl::get(uint8_t** vp, size_t max)
+size_t DOCAUDPEchoStream::Impl::get(uint8_t** vp, size_t max)
 {
     size_t ret = 0;
     struct fr_info* fr_info_global;
@@ -150,7 +150,108 @@ size_t DOCAUDPStream::Impl::get(uint8_t** vp, size_t max)
     return ret;
 }
 
-size_t DOCAUDPStream::count()
+size_t DOCAUDPEchoStream::count()
+{
+    // TBD
+    return 0;
+}
+
+DOCAUDPFrameBuilderStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
+    : sem_fr_idx(0)
+{
+
+    doca_error_t result;
+    result = init_doca_device(nic_addr.c_str(), &ddev, &port_id);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function init_doca_device returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    /* Initialize DOCA GPU instance */
+    result = doca_gpu_create(gpu_addr.c_str(), &gpu_dev);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Function doca_gpu_create returned " + std::string(doca_error_get_descr(result)));
+    }
+
+    int queue_num = 1;
+
+    df_port = init_doca_udp_flow(port_id, queue_num);
+    if (df_port == NULL) {
+        throw std::runtime_error("FAILED: init_doca_flow");
+    }
+
+    rxq.reset(new struct rx_queue);
+    sem_rx.reset(new struct semaphore);
+    sem_fr.reset(new struct semaphore);
+
+    create_rx_queue(rxq.get(), gpu_dev, ddev);
+    create_semaphore(sem_rx.get(), gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct rx_info), DOCA_GPU_MEM_TYPE_GPU);
+    create_semaphore(sem_fr.get(), gpu_dev, frame_num, sizeof(struct fr_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
+    create_udp_pipe(&rxq_pipe, rxq.get(), df_port, queue_num);
+
+    std::vector<uint16_t> dst_ports = { 1234 };
+
+    /* Create root control pipe to route tcp/udp/OS packets */
+    create_udp_root_pipe(&root_pipe, &root_udp_entry, &rxq_pipe, dst_ports.data(), 1, df_port);
+
+    std::vector<cudaStream_t> streams;
+
+    cudaMalloc((void**)&tar_buf, frame_size * frame_num);
+    cudaMalloc((void**)&tmp_buf, tmp_size);
+
+    init_udp_framebuilding_kernels(streams);
+    launch_udp_framebuilding_kernels(rxq.get(), sem_rx.get(), sem_fr.get(),
+        tar_buf, frame_size, tmp_buf,
+        streams);
+}
+
+DOCAUDPFrameBuilderStream::Impl::~Impl()
+{
+    doca_error_t result;
+    // result = destroy_udp_flow_queue(port_id, df_port, udp_queues.get());
+    // if (result != DOCA_SUCCESS) {
+    //     throw std::runtime_error("Function finialize_doca_flow returned " + std::string(doca_error_get_descr(result)));
+    // }
+
+    result = doca_gpu_destroy(gpu_dev);
+    if (result != DOCA_SUCCESS) {
+        throw std::runtime_error("Failed to destroy GPU: " + std::string(doca_error_get_descr(result)));
+    }
+}
+
+bool DOCAUDPFrameBuilderStream::Impl::put(uint8_t** v, size_t count)
+{
+    size_t ret = 0;
+
+    return ret;
+}
+
+size_t DOCAUDPFrameBuilderStream::Impl::get(uint8_t** vp, size_t max)
+{
+    size_t ret = 0;
+    struct fr_info* fr_info_global;
+    enum doca_gpu_semaphore_status status;
+
+    for (; ret < max; ++ret) {
+        uint32_t sem_idx = (sem_fr_idx + ret) % sem_fr->sem_num;
+        doca_gpu_semaphore_get_status(sem_fr->sem_cpu, sem_idx, &status);
+        if (status != DOCA_GPU_SEMAPHORE_STATUS_READY) {
+            break;
+        } else {
+            doca_gpu_semaphore_get_custom_info_addr(sem_fr->sem_cpu, sem_idx, (void**)&(fr_info_global));
+            DOCA_GPUNETIO_VOLATILE(vp[ret]) = DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload);
+            printf("get %p\n", vp[ret]);
+            doca_gpu_semaphore_set_status(sem_fr->sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+        }
+    }
+
+    sem_fr_idx = (sem_fr_idx + ret) % sem_fr->sem_num;
+    // if (ret)
+    //     printf("sem_fr_idx %d\n", sem_fr_idx);
+
+    return ret;
+}
+
+size_t DOCAUDPFrameBuilderStream::count()
 {
     // TBD
     return 0;
