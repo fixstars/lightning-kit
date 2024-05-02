@@ -266,25 +266,27 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         struct doca_gpu* gpu_dev;
         struct doca_dev* ddev;
         struct doca_flow_port* df_port;
-        std::unique_ptr<struct rx_queue> rxq;
-        std::unique_ptr<struct tx_queue> txq;
-        std::unique_ptr<struct semaphore> sem_rx;
-        std::unique_ptr<struct semaphore> sem_fr;
+        std::vector<struct rx_queue> rxq;
+        std::vector<struct tx_queue> txq;
+        std::vector<struct semaphore> sem_rx;
+        std::vector<struct semaphore> sem_pay;
+        std::vector<struct semaphore> sem_fr;
         uint32_t sem_fr_idx;
         uint16_t port_id;
-        struct doca_flow_pipe* rxq_pipe;
+        std::vector<struct doca_flow_pipe*> rxq_pipe;
         struct doca_flow_pipe* root_pipe;
         struct doca_flow_pipe_entry* root_udp_entry;
-        std::unique_ptr<struct tx_buf> tx_buf_arr;
+        std::vector<struct tx_buf> tx_buf_arr;
 
+        static constexpr int rxq_num = 1;
         static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = 1024 * 1024 * 1024;
-        static constexpr size_t TMP_FRAME_SIZE = 1024 * 1024 * 1024;
+        static constexpr size_t FRAME_SIZE = (size_t)512 * 1024 * 1024;
+        static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
         uint32_t* first_ackn;
         int* is_fin;
-        uint8_t* tar_bufs;
-        uint8_t* tmp_buf;
+        std::vector<uint8_t*> tar_bufs;
+        std::vector<uint8_t*> tmp_buf;
 
         Impl(std::string nic_addr, std::string gpu_addr);
         ~Impl();

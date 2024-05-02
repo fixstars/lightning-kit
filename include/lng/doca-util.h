@@ -6,7 +6,7 @@
 #define MAX_PKT_SIZE 8192
 #define MAX_RX_NUM_PKTS 2048
 #define MAX_RX_TIMEOUT_NS 10000 /* 10us */ // 1000000 /* 1ms */
-#define SEMAPHORES_PER_QUEUE 1024
+#define SEMAPHORES_PER_QUEUE (1024 * 2)
 #define CUDA_THREADS 512
 #define FLOW_NB_COUNTERS 524228 /* 1024 x 512 */
 #define DPDK_DEFAULT_PORT 0
@@ -107,8 +107,13 @@ struct stats_tcp {
 };
 
 struct rx_info {
-    uint32_t rx_pkt_num;
-    uint64_t rx_buf_idx;
+    int32_t rx_pkt_num;
+    int64_t rx_buf_idx;
+};
+
+struct pay_info {
+    int32_t rx_pkt_num;
+    int64_t rx_buf_idx;
     uint32_t cur_ackn;
 };
 
@@ -145,10 +150,10 @@ struct doca_flow_port*
 init_doca_udp_flow(uint16_t port_id, uint8_t rxq_num);
 
 doca_error_t
-create_tcp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port);
+create_tcp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe** rxq_pipe, uint16_t* dst_ports, int rxq_num, struct doca_flow_port* port);
 
 doca_error_t
-create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_udp_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port);
+create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe** rxq_pipe, uint16_t* dst_ports, int rxq_num, struct doca_flow_port* port);
 
 doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);
 doca_error_t create_tx_queue(struct tx_queue* txq, struct doca_gpu* gpu_dev, struct doca_dev* ddev);

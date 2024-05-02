@@ -78,6 +78,7 @@ if(LNG_WITH_DOCA)
         src/doca-common-util-internal.cc
         src/doca-stream.cc
         src/doca-tcp-util.cc
+        src/doca-udp-util.cc
         )
 endif()
 add_library(lng-core ${LNG_CORE_SRC})

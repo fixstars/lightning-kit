@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 #define ETHER_ADDR_LEN 6
-#define MAX_PKT_NUM 65536
+#define MAX_PKT_NUM (65536 * 4)
 #define GPU_PAGE_SIZE (1UL << 16)
 
 #define BYTE_SWAP16(v) \
@@ -51,7 +51,6 @@ struct eth_ip_tcp_hdr {
     struct ipv4_hdr l3_hdr; /* IP header */
     struct tcp_hdr l4_hdr; /* TCP header */
 } __attribute__((__packed__));
-
 
 struct udp_hdr {
     uint16_t src_port; /* UDP source port */

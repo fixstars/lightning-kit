@@ -233,6 +233,7 @@ struct client_args {
     std::vector<uint8_t> send_buf;
     uint32_t send_buf_num;
     uint32_t chunk_size;
+    uint32_t check_ack_freq;
 };
 
 int init_rte_env(void* arg1)
@@ -390,7 +391,7 @@ void init(
     const std::string& log_level)
 {
 
-    std::vector<std::string> arguments = { ".", "--lcores", lcores, "--socket-mem", socket_mem, "--iova-mode", iova_mode, "--log-level", log_level, "--file-prefix", dev_pci_addrs[0] };
+    std::vector<std::string> arguments = { ".", "--lcores", lcores, "--socket-mem", socket_mem, "--iova-mode", iova_mode, "--log-level", log_level, "--file-prefix", dev_pci_addrs[0] + lcores };
 
     for (auto& dev_pci_addr : dev_pci_addrs) {
         arguments.push_back("-a");
@@ -544,6 +545,8 @@ int sending_tcp_data(void* arg1)
     uint32_t seqn = arg->seqn;
     uint32_t ackn = arg->ackn;
 
+    uint32_t check_ack_freq = arg->check_ack_freq;
+
     const size_t chunk_size = arg->chunk_size; // 16MiB
 
     // NOTE: Assume frame index is always zero to make things easy
@@ -565,6 +568,8 @@ int sending_tcp_data(void* arg1)
 
     auto ts1 = std::chrono::high_resolution_clock::now();
 
+    size_t tx_time = 0;
+
     while (g_running) {
 
         for (const auto& bs_info : bss) {
@@ -585,19 +590,24 @@ int sending_tcp_data(void* arg1)
             }
 
             // Transmit
-            auto nb = rte_eth_tx_burst(dev_port_id, 0, bs.data(), bs.size());
-            if (nb != bs.size()) {
-                throw std::runtime_error("Failed to send data");
+
+            size_t transmitted_num = 0;
+            while (transmitted_num < bs.size()) {
+                auto nb = rte_eth_tx_burst(dev_port_id, 0, bs.data() + transmitted_num, bs.size() - transmitted_num);
+                transmitted_num += nb;
             }
 
-            auto ns = wait_packet(
-                dev_port_id,
-                [&]() {
-                    return g_running;
-                },
-                [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
-                    return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_cpu_32(tcp->recv_ack) == seqn);
-                });
+            if ((tx_time + 1) % check_ack_freq == 0) {
+                auto ns = wait_packet(
+                    dev_port_id,
+                    [&]() {
+                        return g_running;
+                    },
+                    [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
+                        return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_cpu_32(tcp->recv_ack) == seqn);
+                    });
+            }
+            tx_time++;
 
             if (!g_running) {
                 break;
@@ -858,6 +868,11 @@ int main(int argc, char** argv)
         .help("specify the chunk size for one rx")
         .scan<'u', uint32_t>();
 
+    program.add_argument("--check_ack_interval")
+        .default_value<uint32_t>(1)
+        .help("specify checking ack frequency")
+        .scan<'u', uint32_t>();
+
     program.add_argument("--output_sent_file")
         .default_value<std::string>("")
         .help("specify the filename");
@@ -886,6 +901,7 @@ int main(int argc, char** argv)
     uint32_t frame_num = program.get<uint32_t>("--frame_num");
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
     std::string output_file = program.get<std::string>("--output_sent_file");
+    uint32_t check_ack_freq = program.get<uint32_t>("--check_ack_interval");
 
     auto socket_mem = get_socket_mem(lcores);
 
@@ -916,6 +932,7 @@ int main(int argc, char** argv)
         client_argses.at(i).send_buf = send_buf;
         client_argses.at(i).send_buf_num = frame_num;
         client_argses.at(i).chunk_size = chunk_size;
+        client_argses.at(i).check_ack_freq = check_ack_freq;
     }
 
     std::sort(client_argses.begin(), client_argses.end(),
