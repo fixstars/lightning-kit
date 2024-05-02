@@ -610,11 +610,11 @@ __global__ void cuda_kernel_tcp_makeframe(
     uint8_t* tar_buf, size_t frame_size,
     uint8_t* tmp_buf,
     struct rte_gpu_comm_list* comm_list, int comm_list_entries,
+    struct rte_gpu_comm_list* comm_list_notify_frame, int frame_num,
     uint32_t* seqn,
     // uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
     uint32_t* quit_flag_ptr, bool is_warmup, int id)
 {
-    int frame_num = 2;
 
     if (is_warmup) {
         if (threadIdx.x == 0) {
@@ -897,9 +897,14 @@ __global__ void cuda_kernel_tcp_makeframe(
 
                 // ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
                 // __threadfence_system();
+
+                comm_list_notify_frame[sem_frame_idx].status_d[0] = RTE_GPU_COMM_LIST_READY;
+                __threadfence();
+
                 printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
                 printf("%u %d pkt_num\n", pkt_num, id);
                 sem_frame_idx = (sem_frame_idx + 1) % frame_num;
+
                 cur_tar_buf = nullptr;
                 frame_head -= frame_size;
                 // quit = true;
@@ -929,6 +934,7 @@ void init_dpdk_tcp_framebuilding_kernels(std::vector<cudaStream_t>& streams)
     cuda_kernel_tcp_makeframe<<<1, 32>>>(
         nullptr, 0, nullptr,
         nullptr, 0,
+        nullptr, 0,
         // 0, nullptr,
         nullptr,
         nullptr, true, 0);
@@ -956,6 +962,7 @@ void launch_dpdk_tcp_framebuilding_kernels(
     struct rte_gpu_comm_list* comm_list, int comm_list_entries,
     struct rte_gpu_comm_list* comm_list_recv, int comm_list_recv_entries,
     struct rte_gpu_comm_list* comm_list_ack, int comm_list_ack_entries,
+    struct rte_gpu_comm_list* comm_list_notify_frame, int frame_entries,
     // struct semaphore* sem_fr,
     uint32_t* quit_flag_ptr,
     uint32_t* seqn,
@@ -973,6 +980,7 @@ void launch_dpdk_tcp_framebuilding_kernels(
         tar_buf, frame_size,
         tmp_buf,
         comm_list, comm_list_entries,
+        comm_list_notify_frame, frame_entries,
         // sem_fr->sem_num, sem_fr->sem_gpu,
         seqn,
         quit_flag_ptr,

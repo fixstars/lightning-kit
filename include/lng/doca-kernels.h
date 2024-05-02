@@ -44,6 +44,7 @@ void launch_dpdk_tcp_framebuilding_kernels(
     struct rte_gpu_comm_list* comm_list, int comm_list_entries,
     struct rte_gpu_comm_list* comm_list_recv, int comm_list_recv_entries,
     struct rte_gpu_comm_list* comm_list_ack, int comm_list_ack_entries,
+    struct rte_gpu_comm_list* comm_list_frame, int comm_list_frame_entries,
     // struct semaphore* sem_fr,
     uint32_t* quit_flag_ptr,
     uint32_t* seqn,

@@ -8,6 +8,8 @@
 
 #include <cuda_runtime_api.h>
 
+#include <fstream>
+
 #include "lng/doca-kernels.h" // temporary
 // #include "lng/doca-util.h" // temporary
 #include "lng/net-header.h"
@@ -136,7 +138,7 @@ void ReceiverGPUTCP::setup()
     quit_flag_.reset(new struct rte_gpu_comm_flag);
 
     mbufs.resize(num_entries);
-#define TCP_PACKT_NUM_AT_ONCE 64
+#define TCP_PACKT_NUM_AT_ONCE 128
     for (auto& mbuf : mbufs) {
         mbuf.reset(new rte_mbuf*[TCP_PACKT_NUM_AT_ONCE]);
     }
@@ -149,7 +151,7 @@ void ReceiverGPUTCP::setup()
     comm_list_ = rte_gpu_comm_create_list(gpu_dev_id, num_entries);
     comm_list_ack_ref_ = rte_gpu_comm_create_list(gpu_dev_id, num_ack_entries);
     comm_list_ack_pkt_ = rte_gpu_comm_create_list(gpu_dev_id, num_ack_entries);
-    ack_tmp_mbufs_.resize(num_ack_entries);
+    comm_list_notify_frame_ = rte_gpu_comm_create_list(gpu_dev_id, FRAME_NUM);
 
     for (int i = 0; i < num_ack_entries; ++i) {
         auto buf = nic_stream_->alloc_ack_mbuf();
@@ -159,6 +161,10 @@ void ReceiverGPUTCP::setup()
         // set_header_cpu(rte_pktmbuf_mtod_offset(buf, uint8_t*, 0));
         // cudaDeviceSynchronize();
         // nic_stream_->put(&buf, 1);
+    }
+
+    for (int i = 0; i < FRAME_NUM; ++i) {
+        rte_gpu_comm_set_status(comm_list_notify_frame_ + i, RTE_GPU_COMM_LIST_FREE);
     }
 
     ack_thread.reset(new std::thread([=]() {
@@ -206,13 +212,17 @@ void ReceiverGPUTCP::setup()
     cudaMalloc((void**)&tar_bufs_, FRAME_SIZE * FRAME_NUM);
     cudaMalloc((void**)&tmp_buf_, TMP_FRAME_SIZE);
     cudaMalloc((void**)&seqn_, sizeof(uint32_t));
+    tar_bufs_cpu_ = (uint8_t*)malloc(FRAME_SIZE);
 
     wait_3wayhandshake();
+
+    cudaStreamCreate(&stream_cpy_);
 
     launch_dpdk_tcp_framebuilding_kernels(
         comm_list_, num_entries,
         comm_list_ack_ref_, num_ack_entries,
         comm_list_ack_pkt_, num_ack_entries,
+        comm_list_notify_frame_, FRAME_NUM,
         // sem_fr.get(),
         quit_flag_->ptr,
         seqn_,
@@ -301,6 +311,24 @@ void ReceiverGPUTCP::main()
         rte_pktmbuf_free_bulk(comm_list_[comm_list_free_idx_ % num_entries].mbufs, comm_list_[comm_list_free_idx_ % num_entries].num_pkts);
         rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
         comm_list_free_idx_++;
+    }
+
+    rte_gpu_comm_list_status status;
+    rte_gpu_comm_get_status(comm_list_notify_frame_ + (comm_list_frame_idx_ % FRAME_NUM), &status);
+    if (status == RTE_GPU_COMM_LIST_READY) {
+
+        if (OUTPUT_TO_FILE && comm_list_frame_idx_ == 8) {
+            log::info("outputfile");
+            auto result_buf = tar_bufs_ + FRAME_SIZE * (comm_list_frame_idx_ % FRAME_NUM);
+            cudaMemcpyAsync(tar_bufs_cpu_, result_buf, FRAME_SIZE, cudaMemcpyDeviceToHost, stream_cpy_);
+            cudaStreamSynchronize(stream_cpy_);
+            std::ofstream ofs("outfile.dat");
+            log::info("ofs write");
+            ofs.write((char*)tar_bufs_cpu_, FRAME_SIZE);
+        }
+
+        rte_gpu_comm_set_status(comm_list_notify_frame_ + (comm_list_frame_idx_ % FRAME_NUM), RTE_GPU_COMM_LIST_FREE);
+        comm_list_frame_idx_++;
     }
 
     // prev = nic_stream_->count();
