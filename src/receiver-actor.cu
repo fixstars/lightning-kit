@@ -558,8 +558,8 @@ __global__ void cuda_kernel_tcp_ack(
             // printf("%d comm_list_ack_idx\n", comm_list_ack_idx);
             // printf("%u ACK\n", seqn);
 
-            cur_comm_list_ack->status_d[0] = RTE_GPU_COMM_LIST_FREE;
             *p_status = RTE_GPU_COMM_LIST_FREE;
+            cur_comm_list_ack->status_d[0] = RTE_GPU_COMM_LIST_FREE;
             __threadfence();
 
             comm_list_idx++;

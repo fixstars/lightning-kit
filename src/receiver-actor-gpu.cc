@@ -124,6 +124,8 @@ static inline void set_affinity(int cpu_id)
     sched_setaffinity(0, sizeof(cpu_set_t), &my_set);
 }
 
+// #define ONLY_ACK
+
 void ReceiverGPUTCP::setup()
 {
     init_dpdk_tcp_framebuilding_kernels(streams_);
@@ -138,7 +140,7 @@ void ReceiverGPUTCP::setup()
     quit_flag_.reset(new struct rte_gpu_comm_flag);
 
     mbufs.resize(num_entries);
-#define TCP_PACKT_NUM_AT_ONCE 128
+#define TCP_PACKT_NUM_AT_ONCE 256
     for (auto& mbuf : mbufs) {
         mbuf.reset(new rte_mbuf*[TCP_PACKT_NUM_AT_ONCE]);
     }
@@ -166,6 +168,8 @@ void ReceiverGPUTCP::setup()
     for (int i = 0; i < FRAME_NUM; ++i) {
         rte_gpu_comm_set_status(comm_list_notify_frame_ + i, RTE_GPU_COMM_LIST_FREE);
     }
+
+    comm_list_idx_ = std::make_shared<std::atomic<size_t>>(0);
 
     ack_thread.reset(new std::thread([=]() {
         size_t idx = 0;
@@ -197,6 +201,10 @@ void ReceiverGPUTCP::setup()
             rte_mbuf* new_tmp = nic_stream_->alloc_ack_mbuf();
             rte_gpu_comm_populate_list_pkts(cur_comm, &new_tmp, 1);
 
+#ifdef ONLY_ACK
+            rte_pktmbuf_free_bulk(comm_list_ack_ref_[idx % num_ack_entries].mbufs, 1);
+#endif
+
             // rte_pktmbuf_free(comm_list_ack_ref_[idx % num_ack_entries].mbufs[0]);
             rte_gpu_comm_cleanup_list(comm_list_ack_ref_ + (idx % num_ack_entries));
 
@@ -205,6 +213,32 @@ void ReceiverGPUTCP::setup()
             is_3way_handshake = false;
         }
     }));
+
+#ifndef ONLY_ACK
+    free_thread.reset(new std::thread([=]() {
+        set_affinity(2);
+        while (true) {
+            while (comm_list_free_idx_ < *comm_list_idx_) {
+
+                rte_gpu_comm_list_status status;
+                rte_gpu_comm_get_status(comm_list_ + (comm_list_free_idx_ % num_entries), &status);
+                if (status == RTE_GPU_COMM_LIST_READY) {
+                    break;
+                }
+
+                static int hoge = -1;
+                hoge++;
+                if (hoge % 1000 == 0) {
+                    size_t a = *comm_list_idx_;
+                    log::info("{} {} {} num", comm_list_free_idx_, a, comm_list_[comm_list_free_idx_ % num_entries].num_pkts);
+                }
+                rte_pktmbuf_free_bulk(comm_list_[comm_list_free_idx_ % num_entries].mbufs, comm_list_[comm_list_free_idx_ % num_entries].num_pkts);
+                rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
+                comm_list_free_idx_++;
+            }
+        }
+    }));
+#endif
 
     // sem_fr.reset(new struct semaphore);
     // create_semaphore(sem_fr.get(), gpu_dev_, SEMAPHORES_PER_QUEUE, sizeof(struct fr_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
@@ -274,7 +308,7 @@ void ReceiverGPUTCP::main()
 
     int nb;
 
-    rte_mbuf** v = mbufs.at(comm_list_idx_ % num_entries).get();
+    rte_mbuf** v = mbufs.at((*comm_list_idx_) % num_entries).get();
 
     // static int prev = nic_stream_->count();
 
@@ -285,33 +319,21 @@ void ReceiverGPUTCP::main()
     // auto prev_clone = nic_stream_->count();
 
     rte_mbuf* ack_ref = v[nb - 1]; // nic_stream_->clone_ack_mbuf(v[nb - 1]);
-    rte_gpu_comm_populate_list_pkts(comm_list_ack_ref_ + (comm_list_idx_ % num_ack_entries), &ack_ref, 1);
-    rte_gpu_comm_populate_list_pkts(comm_list_ + (comm_list_idx_ % num_entries), v, nb);
+    // log::info("koko");
+    rte_gpu_comm_populate_list_pkts(comm_list_ack_ref_ + ((*comm_list_idx_) % num_ack_entries), &ack_ref, 1);
+#ifdef ONLY_ACK
+    rte_pktmbuf_free_bulk(v, nb - 1);
+    (*comm_list_idx_)++;
+#else
+    rte_gpu_comm_populate_list_pkts(comm_list_ + ((*comm_list_idx_) % num_entries), v, nb);
     // mbufs_num.at(comm_list_idx_ % num_entries) = nb;
 
     // log::info("{} {} {} {} {} comm_list_idx_", comm_list_idx_, prev, prev_clone, nic_stream_->count(), nb);
     // log::info("{} {} {} comm_list_idx_", comm_list_idx_, nic_stream_->count(), nb);
 
-    comm_list_idx_++;
+    (*comm_list_idx_)++;
 
     // log::info("kokotootta {} {}", nb, nic_stream_->count());
-
-    while (comm_list_free_idx_ < comm_list_idx_) {
-
-        rte_gpu_comm_list_status status;
-        rte_gpu_comm_get_status(comm_list_ + (comm_list_free_idx_ % num_entries), &status);
-        if (status == RTE_GPU_COMM_LIST_READY) {
-            break;
-        }
-
-        // static int hoge = -1;
-        // hoge++;
-        // if (hoge % 100 == 0)
-        // log::info("{} {} {} {} num", comm_list_free_idx_, comm_list_idx_, comm_list_[comm_list_free_idx_ % num_entries].num_pkts, nic_stream_->count());
-        rte_pktmbuf_free_bulk(comm_list_[comm_list_free_idx_ % num_entries].mbufs, comm_list_[comm_list_free_idx_ % num_entries].num_pkts);
-        rte_gpu_comm_cleanup_list(comm_list_ + (comm_list_free_idx_ % num_entries));
-        comm_list_free_idx_++;
-    }
 
     rte_gpu_comm_list_status status;
     rte_gpu_comm_get_status(comm_list_notify_frame_ + (comm_list_frame_idx_ % FRAME_NUM), &status);
@@ -330,6 +352,7 @@ void ReceiverGPUTCP::main()
         rte_gpu_comm_set_status(comm_list_notify_frame_ + (comm_list_frame_idx_ % FRAME_NUM), RTE_GPU_COMM_LIST_FREE);
         comm_list_frame_idx_++;
     }
+#endif
 
     // prev = nic_stream_->count();
 

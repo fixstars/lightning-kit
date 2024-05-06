@@ -98,7 +98,7 @@ private:
 
     static constexpr int num_entries = 1024;
     static constexpr int num_ack_entries = 1024;
-    size_t comm_list_idx_;
+    std::shared_ptr<std::atomic<size_t>> comm_list_idx_;
     size_t comm_list_free_idx_;
     size_t comm_list_frame_idx_;
     std::vector<std::shared_ptr<rte_mbuf*>> mbufs;
@@ -106,6 +106,7 @@ private:
     std::vector<rte_mbuf*> ack_tmp_mbufs_;
 
     std::shared_ptr<std::thread> ack_thread;
+    std::shared_ptr<std::thread> free_thread;
 
     struct rte_gpu_comm_list* comm_list_;
     struct rte_gpu_comm_list* comm_list_ack_ref_;
