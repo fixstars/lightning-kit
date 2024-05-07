@@ -570,7 +570,14 @@ int sending_tcp_data(void* arg1)
 
     size_t tx_time = 0;
 
+    double sum_rtt = 0;
+    double sum2_rtt = 0;
+    double max_rtt = -1;
+    double min_rtt = 1000000;
+
     while (g_running) {
+
+        auto tx_st = std::chrono::high_resolution_clock::now();
 
         for (const auto& bs_info : bss) {
             const auto& reference_bs = std::get<0>(bs_info);
@@ -590,6 +597,9 @@ int sending_tcp_data(void* arg1)
             }
 
             // Transmit
+            if (tx_time % check_ack_freq == 0) {
+                tx_st = std::chrono::high_resolution_clock::now();
+            }
 
             size_t transmitted_num = 0;
             while (transmitted_num < bs.size()) {
@@ -606,6 +616,15 @@ int sending_tcp_data(void* arg1)
                     [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
                         return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_cpu_32(tcp->recv_ack) == seqn);
                     });
+                auto tx_ed = std::chrono::high_resolution_clock::now();
+
+                double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(tx_ed - tx_st).count() / 1000.0;
+                if (tx_time > 10) {
+                    sum_rtt += elapsed;
+                    sum2_rtt += elapsed * elapsed;
+                    max_rtt = std::max(max_rtt, elapsed);
+                    min_rtt = std::min(min_rtt, elapsed);
+                }
             }
             tx_time++;
 
@@ -652,6 +671,16 @@ int sending_tcp_data(void* arg1)
     if (!rte_eth_stats_get(dev_port_id, &stats)) {
         print_statistics(elapsed, stats.obytes);
     }
+
+    if (n > 0) {
+        printf("*****************************\n");
+        printf("average rtt : %f usec \n", sum_rtt / tx_time);
+        printf("std_dev rtt : %f usec \n", std::sqrt(sum2_rtt / tx_time - (sum_rtt / tx_time) * (sum_rtt / tx_time)));
+        printf("minimum rtt : %f usec \n", (double)min_rtt);
+        printf("maximum rtt : %f usec \n", (double)max_rtt);
+        printf("*****************************\n");
+    }
+
     return 0;
 }
 
