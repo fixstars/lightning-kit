@@ -3,6 +3,8 @@
 
 #include <cuda_runtime_api.h>
 
+#include <doca_flow.h>
+
 #include "doca-common-util-internal.h"
 #include "lng/doca-util.h"
 
@@ -36,19 +38,47 @@ create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
     if (pipe == NULL || rxq == NULL || port == NULL || numq > MAX_QUEUES)
         return DOCA_ERROR_INVALID_VALUE;
 
-    struct doca_flow_pipe_cfg pipe_cfg = { 0 };
-    pipe_cfg.attr.name = "GPU_RXQ_TCP_PIPE";
-    pipe_cfg.attr.enable_strict_matching = true;
-    pipe_cfg.attr.type = DOCA_FLOW_PIPE_BASIC;
-    pipe_cfg.attr.nb_actions = 0;
-    pipe_cfg.attr.is_root = false;
-    pipe_cfg.match = &match;
-    pipe_cfg.match_mask = &match_mask;
-    pipe_cfg.monitor = &monitor;
-    pipe_cfg.port = port;
-
     match.outer.l3_type = DOCA_FLOW_L3_TYPE_IP4;
     match.outer.l4_type_ext = DOCA_FLOW_L4_TYPE_EXT_UDP;
+
+    struct doca_flow_pipe_cfg* pipe_cfg;
+
+    result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to create doca_flow_pipe_cfg: %s", doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_name(pipe_cfg, "GPU_RXQ_TCP_PIPE");
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg name: %s", doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg enable_strict_matching: %s",
+            doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_BASIC);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg type: %s", doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, false);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg is_root: %s", doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_match(pipe_cfg, &match, &match_mask);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg match: %s", doca_error_get_descr(result));
+        return result;
+    }
+    result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
+    if (result != DOCA_SUCCESS) {
+        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg monitor: %s", doca_error_get_descr(result));
+        return result;
+    }
 
     for (int idx = 0; idx < numq; idx++) {
         doca_eth_rxq_get_flow_queue_id(rxq[idx].eth_rxq_cpu, &flow_queue_id);
@@ -62,7 +92,7 @@ create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 
     miss_fwd.type = DOCA_FLOW_FWD_DROP;
 
-    result = doca_flow_pipe_create(&pipe_cfg, &fwd, &miss_fwd, pipe);
+    result = doca_flow_pipe_create(pipe_cfg, &fwd, &miss_fwd, pipe);
     if (result != DOCA_SUCCESS) {
         DOCA_LOG_ERR("RxQ pipe creation failed with: %s", doca_error_get_descr(result));
         return result;
@@ -81,7 +111,7 @@ create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
         return result;
     }
 
-    DOCA_LOG_DBG("Created Pipe %s", pipe_cfg.attr.name);
+    // DOCA_LOG_DBG("Created Pipe %s", pipe_cfg->attr.name);
 
     return DOCA_SUCCESS;
 }
@@ -153,7 +183,7 @@ doca_error_t prepare_udp_tx_buf(struct tx_buf* buf)
         pkt = cpu_pkt_addr + (idx * buf->max_pkt_sz);
         hdr = (struct eth_ip_udp_hdr*)pkt;
 
-        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_ETHER_TYPE_IPV4);
+        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_FLOW_ETHER_TYPE_IPV4);
 
         hdr->l3_hdr.version_ihl = 0x45;
         hdr->l3_hdr.type_of_service = 0x0;

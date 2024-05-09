@@ -3,6 +3,10 @@
 
 #include <cuda_runtime_api.h>
 
+#include <doca_buf_array.h>
+#include <doca_dev.h>
+#include <doca_mmap.h>
+
 #include "doca-common-util-internal.h"
 #include "lng/doca-util.h"
 
@@ -398,7 +402,7 @@ doca_error_t create_tx_buf(struct tx_buf* buf, struct doca_gpu* gpu_dev, struct 
         return status;
     }
 
-    status = doca_buf_arr_create(buf->mmap, &buf->buf_arr);
+    status = doca_buf_arr_create(buf->num_packets, &buf->buf_arr);
     if (status != DOCA_SUCCESS) {
         printf("Unable to start buf: doca buf_arr internal error");
         return status;
@@ -410,7 +414,7 @@ doca_error_t create_tx_buf(struct tx_buf* buf, struct doca_gpu* gpu_dev, struct 
         return status;
     }
 
-    status = doca_buf_arr_set_params(buf->buf_arr, buf->max_pkt_sz, buf->num_packets, 0);
+    status = doca_buf_arr_set_params(buf->buf_arr, buf->mmap, buf->max_pkt_sz, 0);
     if (status != DOCA_SUCCESS) {
         printf("Unable to start buf: doca buf_arr internal error");
         return status;
