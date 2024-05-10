@@ -607,16 +607,20 @@ __global__ void cuda_kernel_makeframe(
         // auto cl_start = clock();
         while (true) {
 
-            ret = doca_gpu_dev_semaphore_get_status(sem_recvinfo, (sem_recvinfo_idx + threadIdx.x) % sem_num, &status);
-            if (ret != DOCA_SUCCESS) {
-                printf("TCP semaphore error");
-                return;
-            }
+            packet_reached_thidx = 0;
 
-            if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
-                packet_reached_thidx = threadIdx.x + 1;
-            } else {
-                packet_reached_thidx = 0;
+            for (int idx = threadIdx.x; idx < sem_num; idx += blockDim.x) {
+                ret = doca_gpu_dev_semaphore_get_status(sem_recvinfo, (sem_recvinfo_idx + idx) % sem_num, &status);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP semaphore error");
+                    return;
+                }
+
+                if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
+                    packet_reached_thidx = idx + 1;
+                } else {
+                    break;
+                }
             }
 
             __syncthreads();
