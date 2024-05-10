@@ -117,6 +117,12 @@ struct pay_info {
     uint32_t cur_ackn;
 };
 
+struct pay_dist_info {
+    int64_t rx_buf_idx_head;
+    int64_t rx_buf_idx_tail;
+    uint8_t* cur_tar_buf;
+};
+
 struct fr_info {
     uint8_t* eth_payload;
 };

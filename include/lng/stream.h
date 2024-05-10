@@ -327,6 +327,7 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         std::vector<struct tx_queue> txq;
         std::vector<struct semaphore> sem_rx;
         std::vector<struct semaphore> sem_pay;
+        std::vector<struct semaphore> sem_pkt;
         std::vector<struct semaphore> sem_fr;
         uint32_t sem_fr_idx;
         uint16_t port_id;
@@ -337,7 +338,7 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
 
         static constexpr int rxq_num = 1;
         static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = (size_t)512 * 1024 * 1024;
+        static constexpr size_t FRAME_SIZE = (size_t)1024 * 1024 * 1024;
         static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
         uint32_t* first_ackn;
@@ -413,7 +414,7 @@ struct Payload {
 };
 #endif
 struct Frame {
-    static constexpr size_t frame_size = 256; // 64 * 1024 * 1024;
+    static constexpr size_t frame_size = 512 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };
