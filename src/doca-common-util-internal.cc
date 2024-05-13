@@ -1,7 +1,5 @@
 
 
-#include <doca_mmap.h>
-
 #include "lng/doca-util.h"
 
 #include "log.h"
@@ -63,9 +61,9 @@ init_doca_flow(uint16_t port_id, uint8_t rxq_num, uint64_t offload_flags)
 {
     doca_error_t result;
     char port_id_str[MAX_PORT_STR_LEN];
-    struct doca_flow_port_cfg* port_cfg;
+    struct doca_flow_port_cfg port_cfg = { 0 };
     struct doca_flow_port* df_port;
-    struct doca_flow_cfg* rxq_flow_cfg;
+    struct doca_flow_cfg rxq_flow_cfg = { 0 };
     int ret = 0;
     struct rte_eth_dev_info dev_info = { 0 };
     struct rte_eth_conf eth_conf = {
@@ -140,65 +138,30 @@ init_doca_flow(uint16_t port_id, uint8_t rxq_num, uint64_t offload_flags)
     }
 
     /* Initialize doca flow framework */
-    result = doca_flow_cfg_create(&rxq_flow_cfg);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create doca_flow_cfg: %s", doca_error_get_descr(result));
-        return NULL;
-    }
-    result = doca_flow_cfg_set_pipe_queues(rxq_flow_cfg, rxq_num);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_cfg pipe_queues: %s", doca_error_get_descr(result));
-        doca_flow_cfg_destroy(rxq_flow_cfg);
-        return NULL;
-    }
+    rxq_flow_cfg.pipe_queues = rxq_num;
     /*
      * HWS: Hardware steering
      * Isolated: don't create RSS rule for DPDK created RX queues
      */
-    result = doca_flow_cfg_set_mode_args(rxq_flow_cfg, "vnf,hws,isolated");
+    rxq_flow_cfg.mode_args = "vnf,hws,isolated";
+    rxq_flow_cfg.resource.nb_counters = FLOW_NB_COUNTERS;
+
+    result = doca_flow_init(&rxq_flow_cfg);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_cfg mode_args: %s", doca_error_get_descr(result));
-        doca_flow_cfg_destroy(rxq_flow_cfg);
+        log::error("Failed to init doca flow with: %s", doca_error_get_descr(result));
         return NULL;
     }
-    result = doca_flow_cfg_set_nr_counters(rxq_flow_cfg, FLOW_NB_COUNTERS);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_cfg nr_counters: %s", doca_error_get_descr(result));
-        doca_flow_cfg_destroy(rxq_flow_cfg);
-        return NULL;
-    }
-    result = doca_flow_init(rxq_flow_cfg);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to init doca flow with: %s", doca_error_get_descr(result));
-        doca_flow_cfg_destroy(rxq_flow_cfg);
-        return NULL;
-    }
-    doca_flow_cfg_destroy(rxq_flow_cfg);
 
     /* Start doca flow port */
-    result = doca_flow_port_cfg_create(&port_cfg);
+    port_cfg.port_id = port_id;
+    port_cfg.type = DOCA_FLOW_PORT_DPDK_BY_ID;
+    snprintf(port_id_str, MAX_PORT_STR_LEN, "%d", port_cfg.port_id);
+    port_cfg.devargs = port_id_str;
+    result = doca_flow_port_start(&port_cfg, &df_port);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create doca_flow_port_cfg: %s", doca_error_get_descr(result));
+        log::error("Failed to start doca flow port with: %s", doca_error_get_descr(result));
         return NULL;
     }
-    snprintf(port_id_str, MAX_PORT_STR_LEN, "%d", port_id);
-    result = doca_flow_port_cfg_set_devargs(port_cfg, port_id_str);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_port_cfg devargs: %s", doca_error_get_descr(result));
-        doca_flow_port_cfg_destroy(port_cfg);
-        return NULL;
-    }
-    result = doca_flow_port_start(port_cfg, &df_port);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to start doca flow port with: %s", doca_error_get_descr(result));
-        doca_flow_port_cfg_destroy(port_cfg);
-        return NULL;
-    }
-    doca_flow_port_cfg_destroy(port_cfg);
-    // port_cfg.port_id = port_id;
-    // port_cfg.type = DOCA_FLOW_PORT_DPDK_BY_ID;
-    // snprintf(port_id_str, MAX_PORT_STR_LEN, "%d", port_cfg.port_id);
-    // port_cfg.devargs = port_id_str;
 
     return df_port;
 }
@@ -217,46 +180,16 @@ create_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry*
     if (root_pipe == NULL || root_entry == NULL || rxq_pipe == NULL || port == NULL)
         return DOCA_ERROR_INVALID_VALUE;
 
-    struct doca_flow_pipe_cfg* pipe_cfg;
+    struct doca_flow_pipe_cfg pipe_cfg = { 0 };
+    pipe_cfg.attr.name = "ROOT_PIPE";
+    pipe_cfg.attr.enable_strict_matching = true;
+    pipe_cfg.attr.is_root = true;
+    pipe_cfg.attr.type = DOCA_FLOW_PIPE_CONTROL;
+    pipe_cfg.port = port;
+    pipe_cfg.monitor = &monitor;
+    pipe_cfg.match_mask = &match_mask;
 
-    result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create doca_flow_pipe_cfg: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_name(pipe_cfg, "ROOT_PIPE");
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg name: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg enable_strict_matching: %s",
-            doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_CONTROL);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg type: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, true);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg is_root: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_match(pipe_cfg, NULL, &match_mask);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg match: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg monitor: %s", doca_error_get_descr(result));
-        return result;
-    }
-
-    result = doca_flow_pipe_create(pipe_cfg, NULL, NULL, root_pipe);
+    result = doca_flow_pipe_create(&pipe_cfg, NULL, NULL, root_pipe);
     if (result != DOCA_SUCCESS) {
         log::error("Root pipe creation failed with: %s", doca_error_get_descr(result));
         return result;
@@ -288,7 +221,7 @@ create_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry*
         return result;
     }
 
-    // log::debug("Created Pipe %s", pipe_cfg.attr.name);
+    log::debug("Created Pipe %s", pipe_cfg.attr.name);
 
     return DOCA_SUCCESS;
 }
