@@ -530,6 +530,8 @@ __global__ void cuda_kernel_makeframe(
     struct doca_gpu_eth_rxq* rxq,
     int sem_pkt_num0, struct doca_gpu_semaphore_gpu* sem_pktinfo0,
     int sem_pkt_num1, struct doca_gpu_semaphore_gpu* sem_pktinfo1,
+    int sem_pkt_num2, struct doca_gpu_semaphore_gpu* sem_pktinfo2,
+    int sem_pkt_num3, struct doca_gpu_semaphore_gpu* sem_pktinfo3,
     uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
     int* is_fin, bool is_warmup, int id)
 {
@@ -581,9 +583,15 @@ __global__ void cuda_kernel_makeframe(
     if (id == 0) {
         sem_pkt_num = sem_pkt_num0;
         sem_pktinfo = sem_pktinfo0;
-    } else {
+    } else if (id == 1) {
         sem_pkt_num = sem_pkt_num1;
         sem_pktinfo = sem_pktinfo1;
+    } else if (id == 2) {
+        sem_pkt_num = sem_pkt_num2;
+        sem_pktinfo = sem_pktinfo2;
+    } else {
+        sem_pkt_num = sem_pkt_num3;
+        sem_pktinfo = sem_pktinfo3;
     }
 
     __syncthreads();
@@ -770,6 +778,8 @@ __global__ void cuda_kernel_dist_pkt(
     int sem_num, struct doca_gpu_semaphore_gpu* sem_recvinfo,
     int sem_pkt_num, struct doca_gpu_semaphore_gpu* sem_pktinfo,
     int sem_pkt_num2, struct doca_gpu_semaphore_gpu* sem_pktinfo2,
+    int sem_pkt_num3, struct doca_gpu_semaphore_gpu* sem_pktinfo3,
+    int sem_pkt_num4, struct doca_gpu_semaphore_gpu* sem_pktinfo4,
     uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
     int* is_fin, bool is_warmup, int id)
 {
@@ -793,6 +803,8 @@ __global__ void cuda_kernel_dist_pkt(
 
     uint32_t sem_pay_idx = 0;
     uint32_t sem_pay_idx2 = 0;
+    uint32_t sem_pay_idx3 = 0;
+    uint32_t sem_pay_idx4 = 0;
     __shared__ uint32_t cur_ackn;
 
     doca_error_t ret;
@@ -963,21 +975,25 @@ __global__ void cuda_kernel_dist_pkt(
         if (threadIdx.x == 0) {
             bool is_wait0 = false;
             bool is_wait1 = false;
+            bool is_wait2 = false;
+            bool is_wait3 = false;
 
             auto mid = rx_buf_idx_tail >= rx_buf_idx_head ? (rx_buf_idx_tail + rx_buf_idx_head) / 2
                                                           : (rx_buf_idx_tail + rx_buf_idx_head + MAX_PKT_NUM) / 2;
+            auto midpre = (mid + rx_buf_idx_head) / 2;
+            auto midpost = rx_buf_idx_tail >= mid ? (rx_buf_idx_tail + mid) / 2
+                                                  : (rx_buf_idx_tail + mid + MAX_PKT_NUM) / 2;
 
             {
                 struct pay_dist_info* pay_dist_info_global;
                 ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_pktinfo, sem_pay_idx, (void**)&(pay_dist_info_global));
 
-                auto tail = rx_buf_idx_tail / 2;
                 // printf("%d rx_buf_idx_head0\n", rx_buf_idx_head);
                 // printf("%d tail0\n", mid);
 
-                if (rx_buf_idx_head != mid) {
+                if (rx_buf_idx_head != midpre) {
                     DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx_head);
-                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(mid);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(midpre);
                     DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->cur_tar_buf) = DOCA_GPUNETIO_VOLATILE(cur_tar_buf);
                     __threadfence();
                     doca_gpu_dev_semaphore_set_status(sem_pktinfo, sem_pay_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
@@ -988,27 +1004,62 @@ __global__ void cuda_kernel_dist_pkt(
                 struct pay_dist_info* pay_dist_info_global;
                 ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_pktinfo2, sem_pay_idx2, (void**)&(pay_dist_info_global));
 
-                auto head = rx_buf_idx_tail / 2;
-                // printf("%d head1\n", mid);
-                // printf("%d rx_buf_idx_tail1\n", rx_buf_idx_tail);
+                // printf("%d rx_buf_idx_head0\n", rx_buf_idx_head);
+                // printf("%d tail0\n", mid);
 
-                if (mid != rx_buf_idx_tail) {
-                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(mid);
-                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx_tail);
+                if (midpre != mid) {
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(midpre);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(mid);
                     DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->cur_tar_buf) = DOCA_GPUNETIO_VOLATILE(cur_tar_buf);
                     __threadfence();
                     doca_gpu_dev_semaphore_set_status(sem_pktinfo2, sem_pay_idx2, DOCA_GPU_SEMAPHORE_STATUS_READY);
                     is_wait1 = true;
                 }
             }
+            {
+                struct pay_dist_info* pay_dist_info_global;
+                ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_pktinfo3, sem_pay_idx3, (void**)&(pay_dist_info_global));
 
-            while (is_wait0 && true) {
+                if (mid != midpost) {
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(mid);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(midpost);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->cur_tar_buf) = DOCA_GPUNETIO_VOLATILE(cur_tar_buf);
+                    __threadfence();
+                    doca_gpu_dev_semaphore_set_status(sem_pktinfo3, sem_pay_idx3, DOCA_GPU_SEMAPHORE_STATUS_READY);
+                    is_wait2 = true;
+                }
+            }
+            {
+                struct pay_dist_info* pay_dist_info_global;
+                ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_pktinfo4, sem_pay_idx4, (void**)&(pay_dist_info_global));
+
+                if (midpost != rx_buf_idx_tail) {
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(midpost);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->rx_buf_idx_tail) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx_tail);
+                    DOCA_GPUNETIO_VOLATILE(pay_dist_info_global->cur_tar_buf) = DOCA_GPUNETIO_VOLATILE(cur_tar_buf);
+                    __threadfence();
+                    doca_gpu_dev_semaphore_set_status(sem_pktinfo4, sem_pay_idx4, DOCA_GPU_SEMAPHORE_STATUS_READY);
+                    is_wait3 = true;
+                }
+            }
+
+            while (is_wait0 && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
                 doca_gpu_dev_semaphore_get_status(sem_pktinfo, sem_pay_idx, &status);
                 if (status != DOCA_GPU_SEMAPHORE_STATUS_READY)
                     break;
             }
-            while (is_wait1 && true) {
+            while (is_wait1 && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
                 doca_gpu_dev_semaphore_get_status(sem_pktinfo2, sem_pay_idx2, &status);
+                if (status != DOCA_GPU_SEMAPHORE_STATUS_READY)
+                    break;
+            }
+            while (is_wait2 && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
+                doca_gpu_dev_semaphore_get_status(sem_pktinfo3, sem_pay_idx3, &status);
+                if (status != DOCA_GPU_SEMAPHORE_STATUS_READY)
+                    break;
+            }
+            while (is_wait3 && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
+                doca_gpu_dev_semaphore_get_status(sem_pktinfo4, sem_pay_idx4, &status);
                 if (status != DOCA_GPU_SEMAPHORE_STATUS_READY)
                     break;
             }
@@ -1017,6 +1068,10 @@ __global__ void cuda_kernel_dist_pkt(
                 sem_pay_idx = (sem_pay_idx + 1) % sem_pkt_num;
             if (is_wait1)
                 sem_pay_idx2 = (sem_pay_idx2 + 1) % sem_pkt_num2;
+            if (is_wait2)
+                sem_pay_idx3 = (sem_pay_idx3 + 1) % sem_pkt_num3;
+            if (is_wait3)
+                sem_pay_idx4 = (sem_pay_idx4 + 1) % sem_pkt_num4;
 
             uint64_t bytes = (cur_ackn - prev_ackn);
             // printf("%llu prev_ackn dist\n", prev_ackn);
@@ -1081,6 +1136,8 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         0, nullptr,
         0, nullptr,
         0, nullptr,
+        0, nullptr,
+        0, nullptr,
         nullptr, true, 0);
 
     cuda_kernel_makeframe<<<1, 32>>>(
@@ -1091,11 +1148,13 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         0, nullptr,
         0, nullptr,
         0, nullptr,
+        0, nullptr,
+        0, nullptr,
         nullptr, true, 0);
 
     frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
 
-    streams.resize(6);
+    streams.resize(8);
 
     // int leastPriority;
     // int greatestPriority;
@@ -1109,6 +1168,8 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
     cudaStreamCreate(&streams[3]);
     cudaStreamCreate(&streams[4]);
     cudaStreamCreate(&streams[5]);
+    cudaStreamCreate(&streams[6]);
+    cudaStreamCreate(&streams[7]);
 }
 
 void launch_tcp_kernels(struct rx_queue* rxq,
@@ -1118,6 +1179,8 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     struct semaphore* sem_pay,
     struct semaphore* sem_pkt,
     struct semaphore* sem_pkt2,
+    struct semaphore* sem_pkt3,
+    struct semaphore* sem_pkt4,
     struct semaphore* sem_fr,
     uint8_t* tar_bufs, size_t frame_size,
     uint8_t* tmp_buf,
@@ -1153,6 +1216,8 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         sem_pay->sem_num, sem_pay->sem_gpu,
         sem_pkt->sem_num, sem_pkt->sem_gpu,
         sem_pkt2->sem_num, sem_pkt2->sem_gpu,
+        sem_pkt3->sem_num, sem_pkt3->sem_gpu,
+        sem_pkt4->sem_num, sem_pkt4->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
         is_fin, false, id);
 
@@ -1163,6 +1228,8 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         rxq->eth_rxq_gpu,
         sem_pkt->sem_num, sem_pkt->sem_gpu,
         sem_pkt2->sem_num, sem_pkt2->sem_gpu,
+        sem_pkt3->sem_num, sem_pkt3->sem_gpu,
+        sem_pkt4->sem_num, sem_pkt4->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
         is_fin, false, 0);
 
@@ -1173,8 +1240,34 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         rxq->eth_rxq_gpu,
         sem_pkt->sem_num, sem_pkt->sem_gpu,
         sem_pkt2->sem_num, sem_pkt2->sem_gpu,
+        sem_pkt3->sem_num, sem_pkt3->sem_gpu,
+        sem_pkt4->sem_num, sem_pkt4->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
         is_fin, false, 1);
+
+    cuda_kernel_makeframe<<<1, MAX_THREAD_NUM, 0, streams[6]>>>(
+        frame_size,
+        tmp_buf,
+        first_ackn,
+        rxq->eth_rxq_gpu,
+        sem_pkt->sem_num, sem_pkt->sem_gpu,
+        sem_pkt2->sem_num, sem_pkt2->sem_gpu,
+        sem_pkt3->sem_num, sem_pkt3->sem_gpu,
+        sem_pkt4->sem_num, sem_pkt4->sem_gpu,
+        sem_fr->sem_num, sem_fr->sem_gpu,
+        is_fin, false, 2);
+
+    cuda_kernel_makeframe<<<1, MAX_THREAD_NUM, 0, streams[7]>>>(
+        frame_size,
+        tmp_buf,
+        first_ackn,
+        rxq->eth_rxq_gpu,
+        sem_pkt->sem_num, sem_pkt->sem_gpu,
+        sem_pkt2->sem_num, sem_pkt2->sem_gpu,
+        sem_pkt3->sem_num, sem_pkt3->sem_gpu,
+        sem_pkt4->sem_num, sem_pkt4->sem_gpu,
+        sem_fr->sem_num, sem_fr->sem_gpu,
+        is_fin, false, 3);
 
     frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
 }

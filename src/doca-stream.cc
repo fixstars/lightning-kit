@@ -285,6 +285,8 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
     sem_pay.resize(rxq_num);
     sem_pkt.resize(rxq_num);
     sem_pkt2.resize(rxq_num);
+    sem_pkt3.resize(rxq_num);
+    sem_pkt4.resize(rxq_num);
     sem_fr.resize(rxq_num);
     txq.resize(rxq_num);
     tx_buf_arr.resize(rxq_num);
@@ -300,6 +302,8 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         create_semaphore(&sem_pay[i], gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_info), DOCA_GPU_MEM_TYPE_GPU);
         create_semaphore(&sem_pkt[i], gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_dist_info), DOCA_GPU_MEM_TYPE_GPU);
         create_semaphore(&sem_pkt2[i], gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_dist_info), DOCA_GPU_MEM_TYPE_GPU);
+        create_semaphore(&sem_pkt3[i], gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_dist_info), DOCA_GPU_MEM_TYPE_GPU);
+        create_semaphore(&sem_pkt4[i], gpu_dev, SEMAPHORES_PER_QUEUE, sizeof(struct pay_dist_info), DOCA_GPU_MEM_TYPE_GPU);
         create_semaphore(&sem_fr[i], gpu_dev, FRAME_NUM, sizeof(struct tcp_frame_info), DOCA_GPU_MEM_TYPE_GPU_CPU);
         create_tcp_pipe(&rxq_pipe[i], &rxq[i], df_port, queue_num);
     }
@@ -335,7 +339,7 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
         th[i] = std::thread([&, i]() {
             launch_tcp_kernels(
                 &rxq[i], &txq[i], &tx_buf_arr[i],
-                &sem_rx[i], &sem_pay[i], &sem_pkt[i], &sem_pkt2[i], &sem_fr[i],
+                &sem_rx[i], &sem_pay[i], &sem_pkt[i], &sem_pkt2[i], &sem_pkt3[i], &sem_pkt4[i], &sem_fr[i],
                 tar_bufs[i], FRAME_SIZE,
                 tmp_buf[i],
                 first_ackn + i, is_fin + i, streams[i], i);

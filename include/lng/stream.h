@@ -329,6 +329,8 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         std::vector<struct semaphore> sem_pay;
         std::vector<struct semaphore> sem_pkt;
         std::vector<struct semaphore> sem_pkt2;
+        std::vector<struct semaphore> sem_pkt3;
+        std::vector<struct semaphore> sem_pkt4;
         std::vector<struct semaphore> sem_fr;
         uint32_t sem_fr_idx;
         uint16_t port_id;
