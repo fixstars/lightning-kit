@@ -58,46 +58,18 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
         .counter_type = DOCA_FLOW_RESOURCE_TYPE_NON_SHARED,
     };
 
-    struct doca_flow_pipe_cfg* pipe_cfg;
+    struct doca_flow_pipe_cfg pipe_cfg = { 0 };
+    pipe_cfg.attr.name = "GPU_RXQ_TCP_PIPE";
+    pipe_cfg.attr.enable_strict_matching = true;
+    pipe_cfg.attr.type = DOCA_FLOW_PIPE_BASIC;
+    pipe_cfg.attr.nb_actions = 0;
+    pipe_cfg.attr.is_root = false;
+    pipe_cfg.match = &match;
+    pipe_cfg.match_mask = &match_mask;
+    pipe_cfg.monitor = &monitor;
+    pipe_cfg.port = port;
 
-    result = doca_flow_pipe_cfg_create(&pipe_cfg, port);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create doca_flow_pipe_cfg: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_name(pipe_cfg, "GPU_RXQ_TCP_PIPE");
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg name: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_enable_strict_matching(pipe_cfg, true);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg enable_strict_matching: %s",
-            doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_type(pipe_cfg, DOCA_FLOW_PIPE_BASIC);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg type: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_is_root(pipe_cfg, false);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg is_root: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_match(pipe_cfg, &match, &match_mask);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg match: %s", doca_error_get_descr(result));
-        return result;
-    }
-    result = doca_flow_pipe_cfg_set_monitor(pipe_cfg, &monitor);
-    if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set doca_flow_pipe_cfg monitor: %s", doca_error_get_descr(result));
-        return result;
-    }
-
-    result = doca_flow_pipe_create(pipe_cfg, &fwd, &miss_fwd, pipe);
+    result = doca_flow_pipe_create(&pipe_cfg, &fwd, &miss_fwd, pipe);
     if (result != DOCA_SUCCESS) {
         log::error("RxQ pipe creation failed with: %s", doca_error_get_descr(result));
         return result;
@@ -119,7 +91,7 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
         return result;
     }
 
-    // log::debug("Created Pipe %s", pipe_cfg.attr.name);
+    log::debug("Created Pipe %s", pipe_cfg.attr.name);
 
     return DOCA_SUCCESS;
 }
@@ -235,7 +207,7 @@ doca_error_t prepare_tcp_tx_buf(struct tx_buf* buf)
         pkt = cpu_pkt_addr + (idx * buf->max_pkt_sz);
         hdr = (struct eth_ip_tcp_hdr*)pkt;
 
-        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_FLOW_ETHER_TYPE_IPV4);
+        hdr->l2_hdr.ether_type = rte_cpu_to_be_16(DOCA_ETHER_TYPE_IPV4);
 
         hdr->l3_hdr.version_ihl = 0x45;
         hdr->l3_hdr.type_of_service = 0x0;
