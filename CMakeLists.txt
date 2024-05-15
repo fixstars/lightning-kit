@@ -70,7 +70,8 @@ set(LNG_CORE_SRC
 if(LNG_WITH_CUDA AND LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
         src/protocol_tcp.cu
-        src/protocol_udp.cu)
+        src/protocol_udp.cu
+        src/cuda_latency.cu)
 endif()
 if(LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
@@ -122,6 +123,9 @@ target_link_libraries(lng-core
 #
 add_executable(test_basic test/basic.cc)
 target_link_libraries(test_basic lng-core)
+
+add_executable(test_latency src/cuda_latency.cpp)
+target_link_libraries(test_latency lng-core)
 
 if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
     add_executable(test_dpdk_echo_udp test/dpdk_echo_udp.cc)

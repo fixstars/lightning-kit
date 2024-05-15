@@ -604,7 +604,7 @@ __global__ void cuda_kernel_makeframe(
         // }
         // heart_beat++;
 
-        // auto cl_start = clock();
+        auto cl_start = clock();
         while (true) {
 
             packet_reached_thidx = 0;
@@ -849,7 +849,9 @@ __global__ void cuda_kernel_makeframe(
                 ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
                 __threadfence_system();
                 printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
-                printf("%u %d pkt_num\n", pkt_num, id);
+                printf("%u %d pkt_num\n", bytes, id);
+                auto cl_end = clock();
+                printf("%llu clock\n", cl_end - cl_start);
                 sem_frame_idx = (sem_frame_idx + 1) % frame_num;
                 cur_tar_buf = nullptr;
                 frame_head -= frame_size;
