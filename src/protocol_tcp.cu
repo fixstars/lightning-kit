@@ -295,6 +295,7 @@ __global__ void cuda_kernel_receive_tcp(
                 }
                 DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_pkt_num) = DOCA_GPUNETIO_VOLATILE(rx_pkt_num);
                 DOCA_GPUNETIO_VOLATILE(rx_info_global->rx_buf_idx) = DOCA_GPUNETIO_VOLATILE(rx_buf_idx);
+                // printf("%d rx_pkt_num recv\n", rx_pkt_num);
                 // printf("%d rx_buf_idx recv\n", rx_buf_idx);
                 // printf("%d cur_ackn recv\n", cur_ackn);
 
@@ -1070,6 +1071,441 @@ __global__ void cuda_kernel_makeframe(
     }
 }
 
+#define MAX_THREAD_RING_NUM (512)
+#define MAX_WARP_RING_NUM (MAX_THREAD_RING_NUM / 32)
+
+__global__ void cuda_kernel_makeframe_assumering(
+    uint8_t* tar_buf, size_t frame_size,
+    uint8_t* tmp_buf,
+    uint32_t* first_ackn,
+    struct doca_gpu_eth_rxq* rxq,
+    int sem_num, struct doca_gpu_semaphore_gpu* sem_recvinfo,
+    uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
+    int* is_fin, bool is_warmup, int id)
+{
+    if (is_warmup) {
+        if (threadIdx.x == 0) {
+            printf("warmup cuda_kernel_makeframe\n");
+        }
+        return;
+    }
+    if (threadIdx.x == 0) {
+        printf("cuda_kernel_makeframe performance\n");
+    }
+
+    __shared__ int64_t rx_buf_idx_head;
+    __shared__ int64_t rx_buf_idx_tail;
+
+    __shared__ bool packet_reached;
+    __shared__ uint16_t packet_reached_thidx_share[MAX_WARP_RING_NUM];
+    uint16_t packet_reached_thidx = 0;
+
+    __shared__ uint64_t frame_head;
+    __shared__ uint32_t prev_ackn;
+
+    __shared__ uint8_t* cur_tar_buf;
+
+    __shared__ uintptr_t next_paydiff[MAX_THREAD_RING_NUM];
+    __shared__ uint8_t next_same[MAX_THREAD_RING_NUM];
+
+    uint32_t cur_ackn;
+
+    doca_error_t ret;
+    struct doca_gpu_buf* buf_ptr;
+    struct pay_info* pay_info_global;
+    struct fr_info* fr_global;
+    struct eth_ip_tcp_hdr* hdr;
+    uintptr_t buf_addr;
+    __shared__ uint32_t sem_recvinfo_idx;
+    __shared__ uint32_t sem_frame_idx;
+    uint8_t* payload;
+    __shared__ bool quit;
+    int lane_id = threadIdx.x % warpSize;
+    int warp_id = threadIdx.x / warpSize;
+
+    // int count = 0;
+
+    frame_head = 0;
+    if (threadIdx.x == 0) {
+        DOCA_GPUNETIO_VOLATILE(prev_ackn) = DOCA_GPUNETIO_VOLATILE(*first_ackn);
+        packet_reached = false;
+        cur_tar_buf = nullptr;
+        quit = false;
+        sem_frame_idx = 0;
+        sem_recvinfo_idx = 0;
+        rx_buf_idx_head = -1;
+
+        printf("%d prev_ackn initial\n", prev_ackn);
+    }
+
+    if (blockIdx.x != 0) {
+        return;
+    }
+
+    __syncthreads();
+
+    enum doca_gpu_semaphore_status status;
+    __shared__ enum doca_gpu_semaphore_status status_frame;
+
+    // size_t heart_beat = 0;
+
+    // size_t is_first = 0;
+
+    // auto cl_start = clock();
+    size_t bytes_local = 0;
+    while ((!quit) && (!DOCA_GPUNETIO_VOLATILE(*is_fin))) {
+
+        // if (threadIdx.x == 0 && (heart_beat % ((size_t)100) == 0)) {
+        //     printf("heartbeat frame %d\n", threadIdx.x);
+        // }
+        // heart_beat++;
+
+        auto cl_start = clock();
+        while (true) {
+
+            packet_reached_thidx = 0;
+
+            for (int idx = threadIdx.x; idx < sem_num; idx += blockDim.x) {
+                ret = doca_gpu_dev_semaphore_get_status(sem_recvinfo, (sem_recvinfo_idx + idx) % sem_num, &status);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP semaphore error");
+                    return;
+                }
+
+                if (status == DOCA_GPU_SEMAPHORE_STATUS_READY) {
+                    packet_reached_thidx = idx + 1;
+                } else {
+                    break;
+                }
+            }
+
+            __syncthreads();
+
+            uint16_t local_max = warpMax(packet_reached_thidx);
+
+            if (lane_id == 0) {
+                packet_reached_thidx_share[warp_id] = local_max;
+            }
+            __syncthreads();
+
+            if (threadIdx.x < warpSize) {
+                local_max = threadIdx.x < MAX_WARP_RING_NUM ? packet_reached_thidx_share[threadIdx.x] : 0;
+                packet_reached_thidx_share[0] = warpMax(local_max);
+            }
+
+            __syncthreads();
+
+            if (packet_reached_thidx_share[0] > 0) {
+
+                if (warp_id == 0 && lane_id == 0) {
+
+                    // printf("%d hoonto\n", packet_reached_thidx_share[0]);
+
+                    ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_recvinfo,
+                        sem_recvinfo_idx, (void**)&(pay_info_global));
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP semaphore get address error\n");
+                        return;
+                    }
+
+                    DOCA_GPUNETIO_VOLATILE(rx_buf_idx_head) = DOCA_GPUNETIO_VOLATILE(pay_info_global->rx_buf_idx);
+
+                    __threadfence();
+
+                    // printf("%d rx_buf_idx_head frame \n", rx_buf_idx_head);
+                    // printf("%d rx_pkt_num frame \n", rx_pkt_num);
+                    // printf("%d rx_buf_idx frame \n", rx_buf_idx);
+                    // printf("%d cur_ackn frame \n", cur_ackn);
+
+                    ret = doca_gpu_dev_semaphore_set_status(sem_recvinfo, sem_recvinfo_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP semaphore error\n");
+                        return;
+                    }
+                    __threadfence_system();
+                } else if (warp_id == 1 && lane_id == 0) {
+
+                    size_t sem_idx = (sem_recvinfo_idx + packet_reached_thidx_share[0] - 1) % sem_num;
+
+                    ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_recvinfo,
+                        sem_idx, (void**)&(pay_info_global));
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP semaphore get address error\n");
+                        return;
+                    }
+
+                    int64_t rx_buf_idx;
+                    int32_t rx_pkt_num;
+
+                    DOCA_GPUNETIO_VOLATILE(rx_pkt_num) = DOCA_GPUNETIO_VOLATILE(pay_info_global->rx_pkt_num);
+                    DOCA_GPUNETIO_VOLATILE(rx_buf_idx) = DOCA_GPUNETIO_VOLATILE(pay_info_global->rx_buf_idx);
+                    DOCA_GPUNETIO_VOLATILE(cur_ackn) = DOCA_GPUNETIO_VOLATILE(pay_info_global->cur_ackn);
+
+                    __threadfence();
+                    rx_buf_idx_tail = rx_buf_idx + rx_pkt_num;
+
+                    // printf("%d rx_pkt_num frame \n", rx_pkt_num);
+                    // printf("%d rx_buf_idx frame \n", rx_buf_idx);
+                    // printf("%d cur_ackn frame \n", cur_ackn);
+
+                    ret = doca_gpu_dev_semaphore_set_status(sem_recvinfo, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+                    if (ret != DOCA_SUCCESS) {
+                        printf("TCP semaphore error\n");
+                        return;
+                    }
+                    __threadfence_system();
+                } else if (warp_id >= 2) {
+                    for (size_t i = threadIdx.x + 1 - 2 * warpSize; i < packet_reached_thidx_share[0] - 1; i += (blockDim.x - 2 * warpSize)) {
+                        ret = doca_gpu_dev_semaphore_set_status(sem_recvinfo, (sem_recvinfo_idx + i) % sem_num, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+                        if (ret != DOCA_SUCCESS) {
+                            printf("TCP semaphore error\n");
+                            return;
+                        }
+                        __threadfence_system();
+                    }
+                }
+                break;
+            }
+        }
+
+        bool is_head_copy = false;
+
+        if ((!cur_tar_buf) && threadIdx.x == 0) {
+            ret = doca_gpu_dev_semaphore_get_status(sem_frame, sem_frame_idx, &status_frame);
+            if (ret != DOCA_SUCCESS) {
+                printf("TCP semaphore error");
+                return;
+            }
+            if (status_frame == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
+                printf("%d %lld set buf\n", sem_frame_idx, frame_head);
+                cur_tar_buf = tar_buf + sem_frame_idx * frame_size;
+                is_head_copy = true;
+            }
+        }
+
+        if (threadIdx.x == 0) {
+            sem_recvinfo_idx = (sem_recvinfo_idx + packet_reached_thidx_share[0]) % sem_num;
+            if (is_head_copy)
+                cudaMemcpyAsync(cur_tar_buf, tmp_buf, frame_head, cudaMemcpyDeviceToDevice);
+            // if (heart_beat % 50 == 0) {
+            //     printf("%d rx_buf_idx_head\n", rx_buf_idx_head);
+            //     printf("%d rx_buf_idx_tail\n", rx_buf_idx_tail);
+            // }
+            // if (rx_buf_idx_tail >= MAX_PKT_NUM) {
+            //     printf("-----------------------\n");
+            //     printf("%d rx_buf_idx_head\n", rx_buf_idx_head);
+            //     printf("%d rx_buf_idx_tail\n", rx_buf_idx_tail);
+            // }
+        }
+
+        __syncthreads();
+
+        int64_t pkt_num = rx_buf_idx_tail >= rx_buf_idx_head ? rx_buf_idx_tail - rx_buf_idx_head : rx_buf_idx_tail - rx_buf_idx_head + MAX_PKT_NUM;
+
+        if (cur_tar_buf) {
+            bool is_printed = false;
+            // count++;
+            // if (threadIdx.x == 0 && rx_buf_idx_head == 0) {
+            //     printf("%d %d rx_buf_idx_head\n", rx_buf_idx_head, count);
+            // }
+
+            for (int64_t idx = rx_buf_idx_head + threadIdx.x; idx < rx_buf_idx_head + ((pkt_num / warpSize) * warpSize); idx += blockDim.x) {
+
+                ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx % (int64_t)MAX_PKT_NUM, &buf_ptr);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                    break;
+                }
+                ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                    break;
+                }
+                raw_to_tcp(buf_addr, &hdr, &payload);
+                uint32_t sent_seq = BYTE_SWAP32(hdr->l4_hdr.sent_seq);
+                uint32_t total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
+
+                uint32_t offset = sent_seq - prev_ackn;
+                uint64_t cur_head = frame_head + offset;
+
+                auto warp_tail = __shfl_sync(0xffffffff, cur_head + total_payload_size, warpSize - 1);
+
+                if (warp_tail <= frame_size) {
+                    auto next_payload = __shfl_down_sync(0xffffffff, (uintptr_t)payload, 1);
+                    auto next_payload_diff = next_payload - (uintptr_t)payload;
+                    next_paydiff[threadIdx.x] = next_payload_diff;
+                    if (lane_id == 0) {
+                        next_same[threadIdx.x] = 1;
+                        next_same[threadIdx.x + 1] = ((uintptr_t)payload) > next_payload;
+                        for (int i = threadIdx.x + 2; i < threadIdx.x + warpSize; ++i) {
+                            if (next_paydiff[i - 1] == next_paydiff[i - 2]) {
+                                next_same[i] = 0;
+                            } else {
+                                next_same[i] = 1;
+                                if (i != threadIdx.x + warpSize - 1) {
+                                    next_same[i + 1] = 0;
+                                    i++;
+                                }
+                            }
+                        }
+                    }
+
+                    auto next_size = __shfl_up_sync(0xffffffff, total_payload_size, 1);
+                    if (lane_id == 0)
+                        next_same[threadIdx.x] = 1;
+                    else
+                        next_same[threadIdx.x] |= (next_size == total_payload_size ? 0 : 1);
+
+                    if (next_same[threadIdx.x] != 0) {
+                        int count_pkt = 1;
+                        for (auto i = threadIdx.x + 1; i < (warp_id + 1) * warpSize; ++i) {
+                            if (next_same[i])
+                                break;
+                            count_pkt++;
+                        }
+                        uint32_t write_byte = total_payload_size;
+                        uint8_t* data_head = cur_tar_buf + cur_head;
+                        // if (lane_id != 0)
+                        // {
+                        //     printf("%llu cur_head\n", cur_head);
+                        //     printf("%d count_pkt\n", count_pkt);
+                        //     printf("%p count_pkt\n", payload);
+                        // }
+
+                        if (count_pkt > 1) {
+                            lngMemcpy2DAsync(data_head, write_byte,
+                                payload, next_payload_diff,
+                                write_byte, count_pkt, cudaMemcpyDeviceToDevice);
+                        } else {
+                            lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                        }
+                    }
+                } else {
+                    if (threadIdx.x == 0) {
+                        printf("%llu tail\n", cur_head + total_payload_size);
+                    }
+                    if (cur_head + total_payload_size <= frame_size) {
+                        uint32_t write_byte = total_payload_size;
+                        uint8_t* data_head = cur_tar_buf + cur_head;
+                        lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                    } else if (cur_head < frame_size) {
+                        uint32_t write_byte = frame_size - cur_head;
+                        uint8_t* data_head = cur_tar_buf + cur_head;
+                        lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                        lngMemcpyAsync(tmp_buf, payload + write_byte, total_payload_size - write_byte, cudaMemcpyDeviceToDevice);
+                        // if (total_payload_size - write_byte > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                        //     printf("kokokoko\n");
+                        // }
+                    } else {
+                        lngMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
+                        if ((!is_printed) && cur_head - frame_size + total_payload_size > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                            printf("%" PRIx64 " idx0\n", idx);
+                            printf("%" PRIu64 " idx_round\n", idx % MAX_PKT_NUM);
+                            printf("%" PRIu64 " sent_seq\n", sent_seq);
+                            printf("%" PRIu64 " prev_ackn\n", prev_ackn);
+                            is_printed = true;
+                        }
+                    }
+                }
+            }
+            for (int64_t idx = rx_buf_idx_head + (pkt_num / warpSize * warpSize) + threadIdx.x; idx < rx_buf_idx_head + pkt_num; idx += blockDim.x) {
+
+                ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx % (int64_t)MAX_PKT_NUM, &buf_ptr);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                    break;
+                }
+                ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
+                if (ret != DOCA_SUCCESS) {
+                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                    break;
+                }
+                raw_to_tcp(buf_addr, &hdr, &payload);
+                volatile uint32_t raw_sent_seq = hdr->l4_hdr.sent_seq;
+                uint32_t sent_seq = BYTE_SWAP32(raw_sent_seq);
+                uint32_t total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
+
+                uint32_t offset = sent_seq - prev_ackn;
+                uint64_t cur_head = frame_head + offset;
+
+                if (cur_head + total_payload_size <= frame_size) {
+                    uint32_t write_byte = total_payload_size;
+                    uint8_t* data_head = cur_tar_buf + cur_head;
+                    lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                } else if (cur_head < frame_size) {
+                    uint32_t write_byte = frame_size - cur_head;
+                    uint8_t* data_head = cur_tar_buf + cur_head;
+                    lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                    lngMemcpyAsync(tmp_buf, payload + write_byte, total_payload_size - write_byte, cudaMemcpyDeviceToDevice);
+                    // if (total_payload_size - write_byte > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                    //     printf("kokokoko\n");
+                    // }
+                } else {
+                    lngMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
+                    if ((!is_printed) && cur_head - frame_size + total_payload_size > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                        printf("%" PRIx64 " idx1\n", idx);
+                        printf("%" PRIu64 " idx_round\n", idx % MAX_PKT_NUM);
+                        printf("%" PRIu64 " sent_seq\n", sent_seq);
+                        printf("%" PRIu64 " prev_ackn\n", prev_ackn);
+                        is_printed = true;
+                    }
+                }
+            }
+        }
+
+        // for (int th_num = (blockDim.x + warpSize - 1) / warpSize; th_num > 1; th_num = (th_num + warpSize - 1) / warpSize) {
+        //     if (threadIdx.x < warpSize * ((th_num + warpSize - 1) / warpSize)) {
+        //         local_max = threadIdx.x < th_num ? packet_reached_thidx_share[threadIdx.x] : 0;
+        //         packet_reached_thidx_share[threadIdx.x / warpSize] = warpMax(local_max);
+        //     }
+        //     __syncthreads();
+        // }
+        __syncthreads();
+
+        if (warp_id == 1 && lane_id == 0) {
+            uint64_t bytes = (cur_ackn - prev_ackn);
+            // printf("%" PRIu64 " cur_ackn_fin\n", cur_ackn);
+            // printf("%" PRIu64 " prev_ackn\n", prev_ackn);
+            // bytes_local += bytes;
+            // if (heart_beat % 50 == 0) {
+            //     auto cl_end = clock();
+            //     // printf("%" PRIu64 " bytes\n", bytes_local);
+            //     printf("%lf %d Gbps\n", 8 * bytes_local / ((cl_end - cl_start) / (1.5)), (cl_end - cl_start));
+            //     cl_start = clock();
+            //     bytes_local = 0;
+            // }
+            frame_head += bytes;
+            if (frame_head > 2 * frame_size) {
+                printf("error\n");
+            }
+            if (frame_head > frame_size) {
+                ret = doca_gpu_dev_semaphore_get_custom_info_addr(sem_frame, sem_frame_idx, (void**)&(fr_global));
+                DOCA_GPUNETIO_VOLATILE(fr_global->eth_payload) = DOCA_GPUNETIO_VOLATILE(cur_tar_buf);
+                __threadfence_system();
+
+                ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
+                __threadfence_system();
+                auto cl_end = clock();
+                printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
+                printf("%u %d pkt_num\n", pkt_num, id);
+                printf("%llu clock\n", cl_end - cl_start);
+                sem_frame_idx = (sem_frame_idx + 1) % frame_num;
+                cur_tar_buf = nullptr;
+                frame_head -= frame_size;
+                // quit = true;
+            }
+            prev_ackn = cur_ackn;
+        }
+
+        __syncthreads();
+        packet_reached = false;
+    }
+}
+
 __global__ void frame_notice(
     uint64_t frame_num, struct doca_gpu_semaphore_gpu* sem_frame,
     int* is_fin, bool is_warmup)
@@ -1112,7 +1548,7 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         nullptr, nullptr, nullptr,
         0, nullptr, 0, nullptr, nullptr, true, 0);
 
-    cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
+    cuda_kernel_makeframe_assumering<<<1, CUDA_THREADS>>>(
         nullptr, 0,
         nullptr,
         nullptr,
@@ -1120,6 +1556,15 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
         0, nullptr,
         0, nullptr,
         nullptr, true, 0);
+
+    // cuda_kernel_makeframe<<<1, CUDA_THREADS>>>(
+    //     nullptr, 0,
+    //     nullptr,
+    //     nullptr,
+    //     nullptr,
+    //     0, nullptr,
+    //     0, nullptr,
+    //     nullptr, true, 0);
 
     frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
 
@@ -1171,7 +1616,7 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         sem_pay->sem_num, sem_pay->sem_gpu,
         is_fin, false, id);
 
-    cuda_kernel_makeframe<<<1, MAX_THREAD_NUM, 0, streams[1]>>>(
+    cuda_kernel_makeframe_assumering<<<1, MAX_THREAD_RING_NUM, 0, streams[1]>>>(
         tar_bufs, frame_size,
         tmp_buf,
         first_ackn,
@@ -1179,6 +1624,15 @@ void launch_tcp_kernels(struct rx_queue* rxq,
         sem_pay->sem_num, sem_pay->sem_gpu,
         sem_fr->sem_num, sem_fr->sem_gpu,
         is_fin, false, id);
+
+    // cuda_kernel_makeframe<<<1, MAX_THREAD_NUM, 0, streams[1]>>>(
+    //     tar_bufs, frame_size,
+    //     tmp_buf,
+    //     first_ackn,
+    //     rxq->eth_rxq_gpu,
+    //     sem_pay->sem_num, sem_pay->sem_gpu,
+    //     sem_fr->sem_num, sem_fr->sem_gpu,
+    //     is_fin, false, id);
 
     // frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
 }
