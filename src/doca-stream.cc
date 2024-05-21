@@ -278,12 +278,14 @@ struct DOCATCPStream::Impl {
     std::vector<std::vector<cudaStream_t>> streams;
 
     static constexpr int rxq_num = 1;
-    static constexpr uint32_t FRAME_NUM = 2;
+    static constexpr uint32_t FRAME_NUM = 4;
     static constexpr size_t FRAME_SIZE = (size_t)512 * 1024 * 1024;
     static constexpr size_t TMP_FRAME_SIZE = (size_t)1 * (size_t)1024 * 1024 * 1024;
 
     uint32_t* first_ackn;
     int* is_fin;
+    int* check_frame_ok;
+    cudaStream_t check_stream;
     std::vector<uint8_t*> tar_bufs;
     std::vector<uint8_t*> tmp_buf;
     std::unique_ptr<uint8_t[]> tmp_cpu_buf;
@@ -366,10 +368,13 @@ DOCATCPStream::Impl::Impl(std::string nic_addr, std::string gpu_addr)
 
     cudaMalloc((void**)&is_fin, sizeof(int) * rxq_num);
     cudaMalloc((void**)&first_ackn, sizeof(uint32_t) * rxq_num);
+    cudaMalloc((void**)&check_frame_ok, sizeof(int));
     for (int i = 0; i < rxq_num; ++i) {
         cudaMalloc((void**)&tar_bufs[i], FRAME_SIZE * FRAME_NUM);
         cudaMalloc((void**)&tmp_buf[i], TMP_FRAME_SIZE);
     }
+
+    cudaStreamCreate(&check_stream);
 
     streams.resize(rxq_num);
 
@@ -450,14 +455,17 @@ size_t DOCATCPStream::Impl::get(uint8_t** vp, size_t max)
             doca_gpu_semaphore_get_custom_info_addr(sem_fr.at(0).sem_cpu, sem_idx, (void**)&(fr_info_global));
             DOCA_GPUNETIO_VOLATILE(vp[ret]) = DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload);
             printf("get %p\n", vp[ret]);
-            doca_gpu_semaphore_set_status(sem_fr.at(0).sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
+            frame_check(vp[ret], FRAME_SIZE, check_frame_ok, check_stream);
+            cudaStreamSynchronize(check_stream);
             // static int count = 0;
-            // if (count == 1) {
+            // if (count == 0) {
             //     cudaMemcpy(tmp_cpu_buf.get(), vp[ret], FRAME_SIZE, cudaMemcpyDeviceToHost);
             //     std::ofstream ofs("out.dat");
             //     ofs.write((char*)tmp_cpu_buf.get(), FRAME_SIZE);
             // }
             // count++;
+
+            doca_gpu_semaphore_set_status(sem_fr.at(0).sem_cpu, sem_idx, DOCA_GPU_SEMAPHORE_STATUS_FREE);
         }
     }
 

@@ -1447,6 +1447,8 @@ __global__ void cuda_kernel_makeframe_assumering(
                 } else {
                     lngMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
                     if ((!is_printed) && cur_head - frame_size + total_payload_size > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                        printf("%d pkt_num\n", pkt_num);
+                        printf("%d rx_buf_idx_head\n", rx_buf_idx_head);
                         printf("%" PRIx64 " idx1\n", idx);
                         printf("%" PRIu64 " idx_round\n", idx % MAX_PKT_NUM);
                         printf("%" PRIu64 " sent_seq\n", sent_seq);
@@ -1503,6 +1505,54 @@ __global__ void cuda_kernel_makeframe_assumering(
 
         __syncthreads();
         packet_reached = false;
+    }
+}
+
+__global__ void frame_check_kernel(
+    uint8_t* frame, size_t frame_size, int* res, bool is_warmup)
+{
+    if (is_warmup) {
+        if (threadIdx.x == 0) {
+            printf("warmup frame_check_kernel\n");
+        }
+        return;
+    }
+
+    __shared__ bool is_ok;
+    is_ok = true;
+    __syncthreads();
+
+    for (size_t i = blockDim.x * blockIdx.x + threadIdx.x; i < frame_size; i += blockDim.x * gridDim.x) {
+        if (frame[i] != (uint8_t)i) {
+            is_ok = false;
+            printf("%d actu\n", frame[i]);
+            printf("%d exp\n", (uint8_t)i);
+        }
+        if (!is_ok) {
+            break;
+        }
+    }
+
+    __syncthreads();
+
+    if (threadIdx.x == 0) {
+        atomicAnd(res, is_ok);
+    }
+}
+
+__global__ void frame_check_print(int* res, bool is_warmup)
+{
+    if (is_warmup) {
+        if (threadIdx.x == 0) {
+            printf("warmup frame_check_print\n");
+        }
+        return;
+    }
+
+    if (*res) {
+        printf("kitayo ok\n");
+    } else {
+        printf("kitayo error\n");
     }
 }
 
@@ -1567,6 +1617,9 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
     //     nullptr, true, 0);
 
     frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
+
+    frame_check_kernel<<<1, 32>>>(nullptr, 0, nullptr, true);
+    frame_check_print<<<1, 32>>>(nullptr, true);
 
     streams.resize(4);
 
@@ -1635,6 +1688,14 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     //     is_fin, false, id);
 
     // frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
+}
+
+void frame_check(uint8_t* frame, size_t frame_size, int* res, cudaStream_t stream)
+{
+    cudaMemsetAsync(res, 1, sizeof(int), stream);
+    frame_check_kernel<<<4, 1024, 0, stream>>>(frame, frame_size, res, false);
+    cudaMemsetAsync(frame, 0, frame_size, stream); // reset
+    frame_check_print<<<1, 1, 0, stream>>>(res, false);
 }
 
 }
