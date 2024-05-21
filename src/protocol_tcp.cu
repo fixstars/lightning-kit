@@ -498,7 +498,7 @@ __global__ void send_ack(
             // printf("%d rx_buf_idx recv\n", rx_buf_idx);
             // printf("%d cur_ackn recv\n", cur_ackn);
 
-            // __threadfence();
+            __threadfence();
             doca_gpu_dev_semaphore_set_status(sem_payinfo, sem_pay_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
             if (ret != DOCA_SUCCESS) {
                 printf("TCP semaphore recv error\n");
