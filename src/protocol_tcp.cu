@@ -1383,9 +1383,6 @@ __global__ void cuda_kernel_makeframe_assumering(
                         }
                     }
                 } else {
-                    if (threadIdx.x == 0) {
-                        printf("%llu tail\n", cur_head + total_payload_size);
-                    }
                     if (cur_head + total_payload_size <= frame_size) {
                         uint32_t write_byte = total_payload_size;
                         uint8_t* data_head = cur_tar_buf + cur_head;
@@ -1410,50 +1407,110 @@ __global__ void cuda_kernel_makeframe_assumering(
                     }
                 }
             }
-            for (int64_t idx = rx_buf_idx_head + (pkt_num / warpSize * warpSize) + threadIdx.x; idx < rx_buf_idx_head + pkt_num; idx += blockDim.x) {
+            if (pkt_num % warpSize != 0) {
+                for (int64_t idx = rx_buf_idx_head + (pkt_num / warpSize * warpSize) + threadIdx.x; idx < rx_buf_idx_head + ((pkt_num + warpSize - 1) / warpSize * warpSize); idx += blockDim.x) {
 
-                ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx % (int64_t)MAX_PKT_NUM, &buf_ptr);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
-                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
-                    break;
-                }
-                ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
-                if (ret != DOCA_SUCCESS) {
-                    printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
-                    // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
-                    break;
-                }
-                raw_to_tcp(buf_addr, &hdr, &payload);
-                volatile uint32_t raw_sent_seq = hdr->l4_hdr.sent_seq;
-                uint32_t sent_seq = BYTE_SWAP32(raw_sent_seq);
-                uint32_t total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
+                    uint64_t cur_head = 0;
+                    uint32_t total_payload_size = 0;
+                    uint32_t sent_seq = 0;
+                    if (idx < rx_buf_idx_head + pkt_num) {
+                        ret = doca_gpu_dev_eth_rxq_get_buf(rxq, idx % (int64_t)MAX_PKT_NUM, &buf_ptr);
+                        if (ret != DOCA_SUCCESS) {
+                            printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                            // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                            break;
+                        }
+                        ret = doca_gpu_dev_buf_get_addr(buf_ptr, &buf_addr);
+                        if (ret != DOCA_SUCCESS) {
+                            printf("TCP Error %d doca_gpu_dev_eth_rxq_get_buf block %d thread %d\n", ret, blockIdx.x, threadIdx.x);
+                            // DOCA_GPUNETIO_VOLATILE(*exit_cond) = 1;
+                            break;
+                        }
+                        raw_to_tcp(buf_addr, &hdr, &payload);
+                        volatile uint32_t raw_sent_seq = hdr->l4_hdr.sent_seq;
+                        sent_seq = BYTE_SWAP32(raw_sent_seq);
+                        total_payload_size = BYTE_SWAP16(hdr->l3_hdr.total_length) - sizeof(struct ipv4_hdr) - sizeof(struct tcp_hdr);
 
-                uint32_t offset = sent_seq - prev_ackn;
-                uint64_t cur_head = frame_head + offset;
+                        uint32_t offset = sent_seq - prev_ackn;
+                        cur_head = frame_head + offset;
+                    }
 
-                if (cur_head + total_payload_size <= frame_size) {
-                    uint32_t write_byte = total_payload_size;
-                    uint8_t* data_head = cur_tar_buf + cur_head;
-                    lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
-                } else if (cur_head < frame_size) {
-                    uint32_t write_byte = frame_size - cur_head;
-                    uint8_t* data_head = cur_tar_buf + cur_head;
-                    lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
-                    lngMemcpyAsync(tmp_buf, payload + write_byte, total_payload_size - write_byte, cudaMemcpyDeviceToDevice);
-                    // if (total_payload_size - write_byte > (size_t)1 * (size_t)1024 * 1024 * 1024) {
-                    //     printf("kokokoko\n");
-                    // }
-                } else {
-                    lngMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
-                    if ((!is_printed) && cur_head - frame_size + total_payload_size > (size_t)1 * (size_t)1024 * 1024 * 1024) {
-                        printf("%d pkt_num\n", pkt_num);
-                        printf("%d rx_buf_idx_head\n", rx_buf_idx_head);
-                        printf("%" PRIx64 " idx1\n", idx);
-                        printf("%" PRIu64 " idx_round\n", idx % MAX_PKT_NUM);
-                        printf("%" PRIu64 " sent_seq\n", sent_seq);
-                        printf("%" PRIu64 " prev_ackn\n", prev_ackn);
-                        is_printed = true;
+                    int32_t remain_pkt_num = (pkt_num % warpSize);
+                    auto warp_tail = __shfl_sync(0xffffffff, cur_head + total_payload_size, remain_pkt_num - 1);
+
+                    if (warp_tail <= frame_size) {
+                        auto next_payload = __shfl_down_sync(0xffffffff, (uintptr_t)payload, 1);
+                        auto next_payload_diff = next_payload - (uintptr_t)payload;
+                        next_paydiff[threadIdx.x] = next_payload_diff;
+                        if (lane_id == 0) {
+                            next_same[threadIdx.x] = 1;
+                            next_same[threadIdx.x + 1] = ((uintptr_t)payload) > next_payload;
+                            for (int i = threadIdx.x + 2; i < threadIdx.x + remain_pkt_num; ++i) {
+                                if (next_paydiff[i - 1] == next_paydiff[i - 2]) {
+                                    next_same[i] = 0;
+                                } else {
+                                    next_same[i] = 1;
+                                    if (i != threadIdx.x + remain_pkt_num - 1) {
+                                        next_same[i + 1] = 0;
+                                        i++;
+                                    }
+                                }
+                            }
+                        }
+
+                        auto next_size = __shfl_up_sync(0xffffffff, total_payload_size, 1);
+                        if (lane_id == 0)
+                            next_same[threadIdx.x] = 1;
+                        else
+                            next_same[threadIdx.x] |= (next_size == total_payload_size ? 0 : 1);
+
+                        if (next_same[threadIdx.x] != 0) {
+                            int count_pkt = 1;
+                            for (auto i = threadIdx.x + 1; i < remain_pkt_num; ++i) {
+                                if (next_same[i])
+                                    break;
+                                count_pkt++;
+                            }
+                            uint32_t write_byte = total_payload_size;
+                            uint8_t* data_head = cur_tar_buf + cur_head;
+                            // if (lane_id != 0)
+                            // {
+                            //     printf("%llu cur_head\n", cur_head);
+                            //     printf("%d count_pkt\n", count_pkt);
+                            //     printf("%p count_pkt\n", payload);
+                            // }
+
+                            if (count_pkt > 1) {
+                                lngMemcpy2DAsync(data_head, write_byte,
+                                    payload, next_payload_diff,
+                                    write_byte, count_pkt, cudaMemcpyDeviceToDevice);
+                            } else {
+                                lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                            }
+                        }
+                    } else if (cur_head + total_payload_size <= frame_size) {
+                        uint32_t write_byte = total_payload_size;
+                        uint8_t* data_head = cur_tar_buf + cur_head;
+                        lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                    } else if (cur_head < frame_size) {
+                        uint32_t write_byte = frame_size - cur_head;
+                        uint8_t* data_head = cur_tar_buf + cur_head;
+                        lngMemcpyAsync(data_head, payload, write_byte, cudaMemcpyDeviceToDevice);
+                        lngMemcpyAsync(tmp_buf, payload + write_byte, total_payload_size - write_byte, cudaMemcpyDeviceToDevice);
+                        // if (total_payload_size - write_byte > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                        //     printf("kokokoko\n");
+                        // }
+                    } else {
+                        lngMemcpyAsync(tmp_buf + cur_head - frame_size, payload, total_payload_size, cudaMemcpyDeviceToDevice);
+                        if ((!is_printed) && cur_head - frame_size + total_payload_size > (size_t)1 * (size_t)1024 * 1024 * 1024) {
+                            printf("%d pkt_num\n", pkt_num);
+                            printf("%d rx_buf_idx_head\n", rx_buf_idx_head);
+                            printf("%" PRIx64 " idx1\n", idx);
+                            printf("%" PRIu64 " idx_round\n", idx % MAX_PKT_NUM);
+                            printf("%" PRIu64 " sent_seq\n", sent_seq);
+                            printf("%" PRIu64 " prev_ackn\n", prev_ackn);
+                            is_printed = true;
+                        }
                     }
                 }
             }
