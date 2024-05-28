@@ -569,6 +569,7 @@ int sending_tcp_data(void* arg1)
     auto ts1 = std::chrono::high_resolution_clock::now();
 
     size_t tx_time = 0;
+    size_t rtt_measured = 0;
 
     double sum_rtt = 0;
     double sum2_rtt = 0;
@@ -620,6 +621,7 @@ int sending_tcp_data(void* arg1)
 
                 double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(tx_ed - tx_st).count() / 1000.0;
                 if (tx_time > 10) {
+                    rtt_measured++;
                     sum_rtt += elapsed;
                     sum2_rtt += elapsed * elapsed;
                     max_rtt = std::max(max_rtt, elapsed);
@@ -674,8 +676,8 @@ int sending_tcp_data(void* arg1)
 
     if (n > 0) {
         printf("*****************************\n");
-        printf("average rtt : %f usec \n", sum_rtt / tx_time);
-        printf("std_dev rtt : %f usec \n", std::sqrt(sum2_rtt / tx_time - (sum_rtt / tx_time) * (sum_rtt / tx_time)));
+        printf("average rtt : %f usec \n", sum_rtt / rtt_measured);
+        printf("std_dev rtt : %f usec \n", std::sqrt(sum2_rtt / rtt_measured - (sum_rtt / rtt_measured) * (sum_rtt / rtt_measured)));
         printf("minimum rtt : %f usec \n", (double)min_rtt);
         printf("maximum rtt : %f usec \n", (double)max_rtt);
         printf("*****************************\n");
