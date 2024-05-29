@@ -13,7 +13,7 @@
 
 namespace lng {
 
-void DPDKStream::Impl::wait_for_3wayhandshake()
+rte_mbuf* DPDKStream::Impl::wait_for_3wayhandshake()
 {
     // Wait SYN, send SYN-ACK
     while (true) {
@@ -32,9 +32,10 @@ void DPDKStream::Impl::wait_for_3wayhandshake()
         break;
     }
 
+    rte_mbuf* v;
+
     // Wait ACK
     while (true) {
-        rte_mbuf* v;
         if (!rte_eth_rx_burst(port_id, 0, &v, 1)) {
             continue;
         }
@@ -42,10 +43,44 @@ void DPDKStream::Impl::wait_for_3wayhandshake()
         auto* tcp = rte_pktmbuf_mtod_offset(v, rte_tcp_hdr*, sizeof(rte_ipv4_hdr) + sizeof(rte_ether_hdr));
         if (!(tcp->tcp_flags & RTE_TCP_ACK_FLAG))
             continue;
-
-        rte_pktmbuf_free(v);
         break;
     }
+
+    return v;
+}
+
+void DPDKStream::Impl::prepare_ack_tmp_pkt(rte_mbuf* ref)
+{
+    auto header_size = sizeof(rte_ipv4_hdr) + sizeof(rte_tcp_hdr) + sizeof(rte_ether_hdr);
+
+    ack_tmp_pkt[0] = rte_pktmbuf_copy(ref, rt->get_mempool(), 0, header_size);
+
+    auto* eth = rte_pktmbuf_mtod_offset(ack_tmp_pkt[0], rte_ether_hdr*, 0);
+
+    rte_ether_addr tmp_eth;
+    rte_ether_addr_copy(&eth->dst_addr, &tmp_eth);
+    rte_ether_addr_copy(&eth->src_addr, &eth->dst_addr);
+    rte_ether_addr_copy(&tmp_eth, &eth->src_addr);
+
+    auto* ipv4 = rte_pktmbuf_mtod_offset(ack_tmp_pkt[0], rte_ipv4_hdr*, sizeof(rte_ether_hdr));
+
+    auto tmp_ipv4 = ipv4->src_addr;
+    ipv4->src_addr = ipv4->dst_addr;
+    ipv4->dst_addr = tmp_ipv4;
+
+    auto* tcp = rte_pktmbuf_mtod_offset(ack_tmp_pkt[0], rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+
+    auto tmp_port = tcp->src_port;
+    tcp->src_port = tcp->dst_port;
+    tcp->dst_port = tmp_port;
+    tcp->sent_seq = 0;
+    tcp->recv_ack = 0;
+    tcp->tcp_flags = 0;
+
+    for (int i = 1; i < ACK_TMP_NUM; ++i) {
+        ack_tmp_pkt[i] = rte_pktmbuf_copy(ack_tmp_pkt[0], rt->get_mempool(), 0, header_size);
+    }
+    rte_pktmbuf_free(ref);
 }
 
 void DPDKStream::start()
@@ -116,7 +151,7 @@ void DPDKStream::start()
         throw std::runtime_error(fmt::format("Failed to set mtu (port {}), mtu={}: {}", port_id, mtu, strerror(-ret)));
     }
 
-    uint16_t rx_desc_size = 1024;
+    uint16_t rx_desc_size = 1024 * 32;
     uint16_t tx_desc_size = 1024;
     ret = rte_eth_dev_adjust_nb_rx_tx_desc(port_id, &rx_desc_size, &tx_desc_size);
     if (ret != 0) {
@@ -216,6 +251,25 @@ size_t DPDKStream::count()
     return rte_eth_rx_queue_count(impl_->port_id, 0);
 }
 
+bool DPDKStream::Impl::send_flag_packet_from_tmp(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
+{
+    auto ack_mbuf = rte_pktmbuf_clone(ack_tmp_pkt[ack_tmp_count++], rt->get_mempool());
+    if (ack_tmp_count == ACK_TMP_NUM)
+        ack_tmp_count = 0;
+
+    auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    auto* tcp_recv = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    uint32_t ackn = rte_be_to_cpu_32(tcp_recv->sent_seq) + length + ((tcp_recv->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+
+    tcp->sent_seq = tcp_recv->recv_ack;
+    tcp->recv_ack = rte_cpu_to_be_32(ackn);
+    tcp->tcp_flags = tcp_flags;
+
+    auto num = rte_eth_tx_burst(port_id, 0, &ack_mbuf, 1);
+
+    return num == 1;
+}
+
 bool DPDKStream::Impl::send_flag_packet(rte_mbuf* recv_mbuf, uint32_t length, uint8_t tcp_flags)
 
 {
@@ -265,6 +319,11 @@ bool DPDKStream::Impl::send_synack(rte_mbuf* recv_mbuf)
 bool DPDKStream::Impl::send_ack(rte_mbuf* recv_mbuf, uint32_t length)
 {
     return send_flag_packet(recv_mbuf, length, RTE_TCP_ACK_FLAG);
+}
+
+bool DPDKStream::Impl::send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length)
+{
+    return send_flag_packet_from_tmp(recv_mbuf, length, RTE_TCP_ACK_FLAG);
 }
 
 bool DPDKStream::Impl::check_target_packet(rte_mbuf* recv_mbuf)

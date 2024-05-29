@@ -55,7 +55,7 @@ init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dp
     doca_error_t result;
     int ret;
 
-    std::vector<std::string> eal_param = { "", "-a", "00:00.0", "--file-prefix", "mito" };
+    std::vector<std::string> eal_param = { "", "-a", "00:00.0", "--file-prefix", "a1" };
     std::vector<char*> eal_param_;
     for (auto& p : eal_param) {
         eal_param_.push_back(&p[0]);

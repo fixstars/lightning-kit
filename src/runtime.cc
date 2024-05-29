@@ -30,7 +30,7 @@ DOCARuntime::DOCARuntime()
 void DPDKRuntime::start()
 {
     // Initializion the environment abstraction layer
-    std::vector<std::string> arguments = { "." };
+    std::vector<std::string> arguments = { ".", "-l", "18", "--file-prefix", "dpdk", "--socket-mem", "0,4096" };
     std::vector<char*> args;
     for (auto& a : arguments) {
         args.push_back(&a[0]);
@@ -43,7 +43,7 @@ void DPDKRuntime::start()
     }
 
     // Allocates mempool to hold the mbufs
-    constexpr uint32_t n = 8192 - 1;
+    constexpr uint32_t n = 8192 * 10 - 1;
     constexpr uint32_t cache_size = 256;
     constexpr uint32_t data_room_size = RTE_PKTMBUF_HEADROOM + 10 * 1024;
 

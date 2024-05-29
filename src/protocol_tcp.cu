@@ -1693,7 +1693,7 @@ void launch_tcp_kernels(struct rx_queue* rxq,
 void frame_check(uint8_t* frame, size_t frame_size, int* res, cudaStream_t stream)
 {
     cudaMemsetAsync(res, 1, sizeof(int), stream);
-    frame_check_kernel<<<4, 1024, 0, stream>>>(frame, frame_size, res, false);
+    frame_check_kernel<<<16, 1024, 0, stream>>>(frame, frame_size, res, false);
     cudaMemsetAsync(frame, 0, frame_size, stream); // reset
     frame_check_print<<<1, 1, 0, stream>>>(res, false);
 }

@@ -43,12 +43,11 @@ create_tcp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
         rss_queues[idx] = flow_queue_id;
     }
 
-    struct doca_flow_fwd fwd = {
-        .type = DOCA_FLOW_FWD_RSS,
-        .rss_outer_flags = DOCA_FLOW_RSS_IPV4 | DOCA_FLOW_RSS_TCP,
-        .rss_queues = rss_queues,
-        .num_of_queues = numq,
-    };
+    struct doca_flow_fwd fwd = {};
+    fwd.type = DOCA_FLOW_FWD_RSS;
+    fwd.rss_outer_flags = DOCA_FLOW_RSS_IPV4 | DOCA_FLOW_RSS_TCP;
+    fwd.rss_queues = rss_queues;
+    fwd.num_of_queues = numq;
 
     struct doca_flow_fwd miss_fwd = {
         .type = DOCA_FLOW_FWD_DROP,

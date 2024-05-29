@@ -49,7 +49,8 @@ uint32_t Payload::ExtractPayload(rte_mbuf* mbuf)
 void Receiver::setup()
 {
     log::debug("Receiver is waiting for 3-way handshake");
-    nic_stream_->wait_for_3wayhandshake();
+    rte_mbuf* ref = nic_stream_->wait_for_3wayhandshake();
+    nic_stream_->prepare_ack_tmp_pkt(ref);
     log::debug("Receiver is awaked from 3-way handshake");
 }
 
@@ -74,7 +75,7 @@ void Receiver::main()
     // TODO detect FIN and quit
     auto len = payload_->ExtractPayload(v);
 
-    nic_stream_->send_ack(v, len);
+    nic_stream_->send_ack_from_tmp(v, len);
 
     valid_payload_stream_->put(&payload_, 1);
 
@@ -139,6 +140,7 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 
 void FrameBuilder::main()
 {
+
     if (!frame_) {
         if (!ready_frame_stream_->get(&frame_, 1)) {
             return;
@@ -157,7 +159,7 @@ void FrameBuilder::main()
         if (frame_write_offset_ + segment_size > Frame::frame_size) {
             // The payload has to be split into two frames
             size_t copy_size = Frame::frame_size - frame_write_offset_;
-            log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            // log::trace("1:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, copy_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, copy_size);
 
             // Store payload segment id and read offset for the next frame
@@ -172,7 +174,7 @@ void FrameBuilder::main()
             break;
         } else if (frame_write_offset_ + segment_size == Frame::frame_size) {
             // The payload can fit into the frame exactly
-            log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            // log::trace("2:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
 
             // Payload segment id and read offset should be point to the next segment because the payload is fully copied
@@ -187,7 +189,7 @@ void FrameBuilder::main()
             break;
         } else {
             // The payload can fit into the frame with some space left
-            log::trace("3:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
+            // log::trace("3:w({:5}) <- r({:5},{:5}) len({:5}) val({:#x})", frame_write_offset_, payload_segment_id_, payload_segment_read_offset_, segment_size, *(payload_->segments[seg].addr + payload_segment_read_offset_));
             lng_memcpy(frame_->body + frame_write_offset_, payload_->segments[seg].addr + payload_segment_read_offset_, segment_size);
             payload_segment_read_offset_ = 0;
             frame_write_offset_ += segment_size;

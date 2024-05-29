@@ -85,18 +85,26 @@ class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
         uint16_t port_id;
         uint16_t tcp_port;
         bool send_ack(rte_mbuf* recv_mbuf, uint32_t length);
+        bool send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length);
         bool send_synack(rte_mbuf* tar);
-        void wait_for_3wayhandshake();
+        rte_mbuf* wait_for_3wayhandshake();
+        void prepare_ack_tmp_pkt(rte_mbuf* ref);
         bool check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
             : rt(rt)
             , port_id(port_id)
+            , ack_tmp_count(0)
         {
         }
 
     private:
         bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
+        bool send_flag_packet_from_tmp(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
+
+        static constexpr int ACK_TMP_NUM = 128;
+        int ack_tmp_count;
+        rte_mbuf* ack_tmp_pkt[ACK_TMP_NUM];
     };
 
 public:
@@ -119,14 +127,24 @@ public:
         return impl_->send_ack(recv_mbuf, length);
     }
 
+    bool send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length)
+    {
+        return impl_->send_ack_from_tmp(recv_mbuf, length);
+    }
+
     bool check_target_packet(rte_mbuf* recv_mbuf)
     {
         return impl_->check_target_packet(recv_mbuf);
     }
 
-    void wait_for_3wayhandshake()
+    rte_mbuf* wait_for_3wayhandshake()
     {
-        impl_->wait_for_3wayhandshake();
+        return impl_->wait_for_3wayhandshake();
+    }
+
+    void prepare_ack_tmp_pkt(rte_mbuf* ref)
+    {
+        return impl_->prepare_ack_tmp_pkt(ref);
     }
 
 private:
@@ -373,7 +391,7 @@ struct Payload {
 };
 #endif
 struct Frame {
-    static constexpr size_t frame_size = 256; // 64 * 1024 * 1024;
+    static constexpr size_t frame_size = 512 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };
