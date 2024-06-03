@@ -68,8 +68,27 @@ void Receiver::main()
         return;
     }
 
-    if (!nic_stream_->check_target_packet(v)) {
+    DPDKStream::PKTType type;
+
+    if ((type = nic_stream_->check_target_packet(v)) == DPDKStream::PKTType::OTHER) {
         return;
+    }
+
+    uint64_t current = rte_rdtsc();
+    uint64_t duration = current - prev_rdtsc_;
+    prev_rdtsc_ = current;
+    const int HZ = 3000;
+    int idx = duration / (100 * HZ);
+    if (idx >= NUM_RDTSC) {
+        TIMING.at(NUM_RDTSC - 1)++;
+    } else if (idx >= 0) {
+        TIMING.at(idx)++;
+    }
+
+    if (type == DPDKStream::PKTType::FIN) {
+        for (int i = 0; i < NUM_RDTSC; ++i) {
+            log::info("under {}00 usec {} times", i + 1, TIMING.at(i));
+        }
     }
 
     // TODO detect FIN and quit
@@ -110,6 +129,7 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 #elif __AVX2__
 #pragma message("AVX2 selected")
 
+#if 1
 void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 {
     const uint8_t align = 64;
@@ -130,6 +150,17 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
         memcpy((char*)dst_p, (char*)src, size - size_aligned);
     }
 }
+#else
+void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
+{
+    // volatile uint8_t a;
+    for (size_t i = 0; i < size; ++i) {
+        dst[i] = src[i];
+    }
+}
+
+#endif
+
 #else
 #warning "nomal memcpy"
 void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)

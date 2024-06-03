@@ -326,30 +326,34 @@ bool DPDKStream::Impl::send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length)
     return send_flag_packet_from_tmp(recv_mbuf, length, RTE_TCP_ACK_FLAG);
 }
 
-bool DPDKStream::Impl::check_target_packet(rte_mbuf* recv_mbuf)
+DPDKStream::PKTType DPDKStream::Impl::check_target_packet(rte_mbuf* recv_mbuf)
 {
     auto eh = rte_pktmbuf_mtod(recv_mbuf, rte_ether_hdr*);
     if (rte_be_to_cpu_16(eh->ether_type) == RTE_ETHER_TYPE_ARP) {
         // TODO reply arp
         rte_pktmbuf_free(recv_mbuf);
-        return false;
+        return PKTType::OTHER;
     }
     rte_net_hdr_lens hdr_lens;
     auto packet_type = rte_net_get_ptype(recv_mbuf, &hdr_lens, RTE_PTYPE_ALL_MASK);
     if (!RTE_ETH_IS_IPV4_HDR(packet_type) || ((packet_type & RTE_PTYPE_L4_MASK) != RTE_PTYPE_L4_TCP)) {
         rte_pktmbuf_free(recv_mbuf);
-        return false;
+        return PKTType::OTHER;
     }
     auto* tcp = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, hdr_lens.l2_len + hdr_lens.l3_len);
     if (tcp->dst_port != tcp_port) {
         rte_pktmbuf_free(recv_mbuf);
-        return false;
+        return PKTType::OTHER;
     }
     if (tcp->tcp_flags & RTE_TCP_SYN_FLAG) {
         rte_pktmbuf_free(recv_mbuf);
-        return false;
+        return PKTType::OTHER;
     }
-    return true;
+    if (tcp->tcp_flags & RTE_TCP_FIN_FLAG) {
+        rte_pktmbuf_free(recv_mbuf);
+        return PKTType::FIN;
+    }
+    return PKTType::TCP;
 }
 
 void DPDKGPUUDPStream::start()

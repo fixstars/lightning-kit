@@ -17,6 +17,7 @@ public:
         , valid_payload_stream_(valid)
         , ready_payload_stream_(ready)
         , payload_(nullptr)
+        , TIMING()
     {
     }
 
@@ -30,6 +31,11 @@ private:
     std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
 
     Payload* payload_;
+
+    static constexpr int NUM_RDTSC = 16;
+    uint64_t prev_rdtsc_ = 0;
+
+    std::array<uint64_t, NUM_RDTSC> TIMING;
 };
 
 class FrameBuilder : public Actor {

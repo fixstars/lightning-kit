@@ -80,6 +80,14 @@ private:
 
 class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
 
+public:
+    enum PKTType {
+        FIN,
+        TCP,
+        OTHER
+    };
+
+private:
     struct Impl {
         std::shared_ptr<DPDKRuntime> rt;
         uint16_t port_id;
@@ -89,7 +97,7 @@ class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
         bool send_synack(rte_mbuf* tar);
         rte_mbuf* wait_for_3wayhandshake();
         void prepare_ack_tmp_pkt(rte_mbuf* ref);
-        bool check_target_packet(rte_mbuf* recv_mbuf);
+        PKTType check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
             : rt(rt)
@@ -132,7 +140,7 @@ public:
         return impl_->send_ack_from_tmp(recv_mbuf, length);
     }
 
-    bool check_target_packet(rte_mbuf* recv_mbuf)
+    PKTType check_target_packet(rte_mbuf* recv_mbuf)
     {
         return impl_->check_target_packet(recv_mbuf);
     }
