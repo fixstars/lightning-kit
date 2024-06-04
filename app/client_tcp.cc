@@ -234,6 +234,7 @@ struct client_args {
     uint32_t send_buf_num;
     uint32_t chunk_size;
     uint32_t check_ack_freq;
+    bool ignore_ack;
 };
 
 int init_rte_env(void* arg1)
@@ -549,6 +550,8 @@ int sending_tcp_data(void* arg1)
 
     const size_t chunk_size = arg->chunk_size; // 16MiB
 
+    bool ignore_ack = arg->ignore_ack;
+
     // NOTE: Assume frame index is always zero to make things easy
     std::vector<std::tuple<std::vector<struct rte_mbuf*>, size_t>> bss;
     {
@@ -608,7 +611,7 @@ int sending_tcp_data(void* arg1)
                 transmitted_num += nb;
             }
 
-            if ((tx_time + 1) % check_ack_freq == 0) {
+            if (!ignore_ack && ((tx_time + 1) % check_ack_freq == 0)) {
                 auto ns = wait_packet(
                     dev_port_id,
                     [&]() {
@@ -908,6 +911,10 @@ int main(int argc, char** argv)
         .default_value<std::string>("")
         .help("specify the filename");
 
+    program.add_argument("--ignore_ack")
+        .help("switch ignore ack")
+        .flag();
+
     try {
         program.parse_args(argc, argv);
     } catch (const std::exception& err) {
@@ -933,6 +940,7 @@ int main(int argc, char** argv)
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
     std::string output_file = program.get<std::string>("--output_sent_file");
     uint32_t check_ack_freq = program.get<uint32_t>("--check_ack_interval");
+    bool ignore_ack = (program["--ignore_ack"] == true);
 
     auto socket_mem = get_socket_mem(lcores);
 
@@ -964,6 +972,7 @@ int main(int argc, char** argv)
         client_argses.at(i).send_buf_num = frame_num;
         client_argses.at(i).chunk_size = chunk_size;
         client_argses.at(i).check_ack_freq = check_ack_freq;
+        client_argses.at(i).ignore_ack = ignore_ack;
     }
 
     std::sort(client_argses.begin(), client_argses.end(),
