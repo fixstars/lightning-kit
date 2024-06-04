@@ -169,8 +169,17 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 }
 #endif
 
+#define DISABLE_FRAME
+
 void FrameBuilder::main()
 {
+
+#ifdef DISABLE_FRAME
+    if (!valid_payload_stream_->get(&payload_, 1)) {
+        return;
+    }
+    ready_payload_stream_->put(&payload_, 1);
+#else
 
     if (!frame_) {
         if (!ready_frame_stream_->get(&frame_, 1)) {
@@ -234,6 +243,7 @@ void FrameBuilder::main()
         payload_segment_id_ = 0;
         payload_segment_read_offset_ = 0;
     }
+#endif
 }
 
 } // lng
