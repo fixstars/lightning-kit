@@ -544,6 +544,7 @@ int sending_tcp_data(void* arg1)
     uint16_t nb_txd = arg->nb_txd;
 
     uint32_t seqn = arg->seqn;
+    uint32_t wait_seqn = arg->seqn;
     uint32_t ackn = arg->ackn;
 
     uint32_t check_ack_freq = arg->check_ack_freq;
@@ -551,6 +552,8 @@ int sending_tcp_data(void* arg1)
     const size_t chunk_size = arg->chunk_size; // 16MiB
 
     bool ignore_ack = arg->ignore_ack;
+
+    bool is_first = true;
 
     // NOTE: Assume frame index is always zero to make things easy
     std::vector<std::tuple<std::vector<struct rte_mbuf*>, size_t>> bss;
@@ -600,6 +603,33 @@ int sending_tcp_data(void* arg1)
                 seqn += rte_pktmbuf_pkt_len(b) - b->l2_len - b->l3_len - b->l4_len;
             }
 
+            if (!is_first) {
+                if (!ignore_ack && ((tx_time + 1) % check_ack_freq == 0)) {
+                    auto ns = wait_packet(
+                        dev_port_id,
+                        [&]() {
+                            return g_running;
+                        },
+                        [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
+                            return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_c\
+pu_32(tcp->recv_ack) == wait_seqn);
+                        });
+                    auto tx_ed = std::chrono::high_resolution_clock::now();
+
+                    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(tx_ed - tx_st).count() / 1000.0;
+                    if (tx_time > 10) {
+                        rtt_measured++;
+                        sum_rtt += elapsed;
+                        sum2_rtt += elapsed * elapsed;
+                        max_rtt = std::max(max_rtt, elapsed);
+                        min_rtt = std::min(min_rtt, elapsed);
+                    }
+                }
+            } else {
+                is_first = false;
+            }
+            wait_seqn = seqn;
+
             // Transmit
             if (tx_time % check_ack_freq == 0) {
                 tx_st = std::chrono::high_resolution_clock::now();
@@ -611,26 +641,6 @@ int sending_tcp_data(void* arg1)
                 transmitted_num += nb;
             }
 
-            if (!ignore_ack && ((tx_time + 1) % check_ack_freq == 0)) {
-                auto ns = wait_packet(
-                    dev_port_id,
-                    [&]() {
-                        return g_running;
-                    },
-                    [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
-                        return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_cpu_32(tcp->recv_ack) == seqn);
-                    });
-                auto tx_ed = std::chrono::high_resolution_clock::now();
-
-                double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(tx_ed - tx_st).count() / 1000.0;
-                if (tx_time > 10) {
-                    rtt_measured++;
-                    sum_rtt += elapsed;
-                    sum2_rtt += elapsed * elapsed;
-                    max_rtt = std::max(max_rtt, elapsed);
-                    min_rtt = std::min(min_rtt, elapsed);
-                }
-            }
             tx_time++;
 
             if (!g_running) {
