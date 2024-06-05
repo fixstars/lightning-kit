@@ -169,7 +169,7 @@ void lng_memcpy(uint8_t* dst, uint8_t* src, size_t size)
 }
 #endif
 
-#define DISABLE_FRAME
+// #define DISABLE_FRAME
 
 void FrameBuilder::main()
 {

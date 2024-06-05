@@ -60,7 +60,6 @@ set(LNG_CORE_SRC
     src/actor.cc
     src/receiver-actor.cc
     src/receiver-actor.cu
-    src/receiver-actor-gpu.cc
     src/event.cc
     src/log.cc
     src/runtime.cc
@@ -69,6 +68,7 @@ set(LNG_CORE_SRC
     )
 if(LNG_WITH_CUDA AND LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
+        src/receiver-actor-gpu.cc
         src/protocol_tcp.cu
         src/protocol_udp.cu)
 endif()

@@ -113,6 +113,7 @@ private:
         static constexpr int ACK_TMP_NUM = 128;
         int ack_tmp_count;
         rte_mbuf* ack_tmp_pkt[ACK_TMP_NUM];
+        uint32_t prev_ack = 0;
     };
 
 public:

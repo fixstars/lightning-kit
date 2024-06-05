@@ -259,7 +259,13 @@ bool DPDKStream::Impl::send_flag_packet_from_tmp(rte_mbuf* recv_mbuf, uint32_t l
 
     auto* tcp = rte_pktmbuf_mtod_offset(ack_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
     auto* tcp_recv = rte_pktmbuf_mtod_offset(recv_mbuf, rte_tcp_hdr*, sizeof(rte_ether_hdr) + sizeof(rte_ipv4_hdr));
+    if (prev_ack != rte_be_to_cpu_32(tcp_recv->sent_seq)) {
+        log::debug("{} {} seq differ", prev_ack, rte_be_to_cpu_32(tcp_recv->sent_seq));
+    }
+
     uint32_t ackn = rte_be_to_cpu_32(tcp_recv->sent_seq) + length + ((tcp_recv->tcp_flags & RTE_TCP_FIN_FLAG) ? 1 : 0);
+
+    prev_ack = ackn;
 
     tcp->sent_seq = tcp_recv->recv_ack;
     tcp->recv_ack = rte_cpu_to_be_32(ackn);
