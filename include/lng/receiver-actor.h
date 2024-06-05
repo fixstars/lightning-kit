@@ -32,7 +32,7 @@ private:
 
     Payload* payload_;
 
-    static constexpr int NUM_RDTSC = 16;
+    static constexpr int NUM_RDTSC = 16 * 25;
     uint64_t prev_rdtsc_ = 0;
 
     std::array<uint64_t, NUM_RDTSC> TIMING;

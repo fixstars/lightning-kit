@@ -78,7 +78,7 @@ void Receiver::main()
     uint64_t duration = current - prev_rdtsc_;
     prev_rdtsc_ = current;
     const int HZ = 3000;
-    int idx = duration / (100 * HZ);
+    int idx = duration / (4 * HZ);
     if (idx >= NUM_RDTSC) {
         TIMING.at(NUM_RDTSC - 1)++;
     } else if (idx >= 0) {
@@ -87,7 +87,7 @@ void Receiver::main()
 
     if (type == DPDKStream::PKTType::FIN) {
         for (int i = 0; i < NUM_RDTSC; ++i) {
-            log::info("under {}00 usec {} times", i + 1, TIMING.at(i));
+            log::info("under {} usec {} times", (i + 1) * 4, TIMING.at(i));
         }
     }
 

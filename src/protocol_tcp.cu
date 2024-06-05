@@ -313,6 +313,11 @@ __global__ void cuda_kernel_receive_tcp(
     }
 }
 
+#define MEASURE_JITTER
+#define INTERVAL 4
+#define NUM_INTERVALS (16 * 25)
+#define HZ 1950
+
 __global__ void send_ack(
     struct doca_gpu_eth_rxq* rxq,
     struct doca_gpu_eth_txq* txq,
@@ -327,6 +332,10 @@ __global__ void send_ack(
         }
         return;
     }
+
+#ifdef MEASURE_JITTER
+    __shared__ int jitter[NUM_INTERVALS];
+#endif
 
     __shared__ int32_t rx_pkt_num;
     __shared__ int64_t rx_buf_idx;
@@ -352,6 +361,10 @@ __global__ void send_ack(
     __syncthreads();
 
     enum doca_gpu_semaphore_status status;
+
+#ifdef MEASURE_JITTER
+    uint64_t prev_rdtsc_ = 0;
+#endif
 
     while (!(*is_fin)) {
 
@@ -477,6 +490,17 @@ __global__ void send_ack(
             doca_gpu_dev_eth_txq_push(txq);
             // printf("%d doca_gpu_dev_eth_txq_push\n", id);
             // auto tx_ed_clock = clock64();
+#ifdef MEASURE_JITTER
+            uint64_t current = clock64();
+            uint64_t duration = current - prev_rdtsc_;
+            prev_rdtsc_ = current;
+            int idx_du = duration / (INTERVAL * HZ);
+            if (idx_du >= NUM_INTERVALS) {
+                jitter[NUM_INTERVALS - 1]++;
+            } else if (idx_du >= 0) {
+                jitter[idx_du]++;
+            }
+#endif
         }
 
         if (threadIdx.x == 0 && rx_pkt_num > 0) {
@@ -510,6 +534,14 @@ __global__ void send_ack(
         }
         __syncthreads();
     }
+
+#ifdef MEASURE_JITTER
+    if (threadIdx.x == 0) {
+        for (int i = 0; i < NUM_INTERVALS; ++i) {
+            printf("under %d sec %d times\n", (i + 1) * 4, jitter[i]);
+        }
+    }
+#endif
 }
 
 template <typename T>
