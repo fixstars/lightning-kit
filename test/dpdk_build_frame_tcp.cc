@@ -72,7 +72,7 @@ int main()
         auto valid_payload_stream = sys.create_stream<MemoryStream<Payload*>>();
         auto ready_payload_stream = sys.create_stream<MemoryStream<Payload*>>();
 
-        const int num_pays = 1024;
+        const int num_pays = (5 * 1024);
         std::unique_ptr<Payload> pays[num_pays];
         for (int i = 0; i < num_pays; ++i) {
             pays[i].reset(new Payload);
