@@ -21,6 +21,8 @@ public:
     {
     }
 
+    ~Receiver();
+
 protected:
     virtual void setup() override;
     virtual void main() override;

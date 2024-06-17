@@ -54,6 +54,13 @@ void Receiver::setup()
     log::debug("Receiver is awaked from 3-way handshake");
 }
 
+Receiver::~Receiver()
+{
+    for (int i = 0; i < NUM_RDTSC; ++i) {
+        log::info("under {} usec {} times", (i + 1) * 4, TIMING.at(i));
+    }
+}
+
 void Receiver::main()
 {
     if (!payload_) {
