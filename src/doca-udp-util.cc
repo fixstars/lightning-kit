@@ -128,9 +128,9 @@ create_udp_pipe(struct doca_flow_pipe** pipe, struct rx_queue* rxq, struct doca_
 //     return DOCA_SUCCESS;
 // }
 
-doca_error_t create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe* rxq_pipe, struct doca_flow_port* port)
+doca_error_t create_udp_root_pipe(struct doca_flow_pipe** root_pipe, struct doca_flow_pipe_entry** root_entry, struct doca_flow_pipe** rxq_pipe, uint16_t* dst_ports, int rxq_num, struct doca_flow_port* port)
 {
-    return create_root_pipe(root_pipe, root_entry, rxq_pipe, port, DOCA_FLOW_L4_TYPE_EXT_UDP);
+    return create_root_pipe(root_pipe, root_entry, rxq_pipe, dst_ports, rxq_num, port, DOCA_FLOW_L4_TYPE_EXT_UDP);
 }
 
 doca_error_t prepare_udp_tx_buf(struct tx_buf* buf)

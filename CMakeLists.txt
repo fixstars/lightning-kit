@@ -59,6 +59,7 @@ file(GENERATE OUTPUT ${PROJECT_BINARY_DIR}/VERSION CONTENT "${LNG_KIT_VERSION_S}
 set(LNG_CORE_SRC
     src/actor.cc
     src/receiver-actor.cc
+    src/receiver-actor.cu
     src/event.cc
     src/log.cc
     src/runtime.cc
@@ -67,6 +68,7 @@ set(LNG_CORE_SRC
     )
 if(LNG_WITH_CUDA AND LNG_WITH_DOCA)
     list(APPEND LNG_CORE_SRC
+        src/receiver-actor-gpu.cc
         src/protocol_tcp.cu
         src/protocol_udp.cu)
 endif()
@@ -76,7 +78,8 @@ if(LNG_WITH_DOCA)
         src/doca-common-util-internal.cc
         src/doca-stream.cc
         src/doca-tcp-util.cc
-        src/doca-udp-util.cc)
+        src/doca-udp-util.cc
+        )
 endif()
 add_library(lng-core ${LNG_CORE_SRC})
 
@@ -126,6 +129,22 @@ if(LNG_WITH_DOCA OR LNG_WITH_DPDK)
 
     add_executable(test_dpdk_build_frame_tcp test/dpdk_build_frame_tcp.cc)
     target_link_libraries(test_dpdk_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
+    add_executable(test_dpdk_gpu_build_frame_udp test/dpdk_gpu_build_frame_udp.cc)
+    target_include_directories(
+      test_dpdk_gpu_build_frame_udp 
+      PRIVATE 
+      ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    )
+    target_link_libraries(test_dpdk_gpu_build_frame_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
+    add_executable(test_dpdk_gpu_build_frame_tcp test/dpdk_gpu_build_frame_tcp.cc)
+    target_include_directories(
+      test_dpdk_gpu_build_frame_tcp 
+      PRIVATE 
+      ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
+    )
+    target_link_libraries(test_dpdk_gpu_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
 if(LNG_WITH_DOCA)
@@ -134,6 +153,9 @@ if(LNG_WITH_DOCA)
 
     add_executable(test_doca_build_frame_tcp test/doca_build_frame_tcp.cc)
     target_link_libraries(test_doca_build_frame_tcp lng-core ${LIBDPDK_STATIC_LDFLAGS})
+
+    add_executable(test_doca_build_frame_udp test/doca_build_frame_udp.cc)
+    target_link_libraries(test_doca_build_frame_udp lng-core ${LIBDPDK_STATIC_LDFLAGS})
 endif()
 
 # if(LNG_WITH_NVIDIA)

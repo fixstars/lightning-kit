@@ -74,13 +74,13 @@ int main()
 
         System sys;
 
-        auto outer_stream(sys.create_stream<DOCATCPStream>("a1:00.1", "81:00.0"));
+        auto outer_stream(sys.create_stream<DOCATCPStream>("c1:00.0", "81:00.0"));
         auto inner_stream(sys.create_stream<MemoryStream<uint8_t*>>());
 
-        auto receiver(sys.create_actor<Receiver>("/receiver", 4,
+        auto receiver(sys.create_actor<Receiver>("/receiver", 20,
             inner_stream,
             outer_stream));
-        auto sender(sys.create_actor<Sender>("/sender", 5,
+        auto sender(sys.create_actor<Sender>("/sender", 21,
             inner_stream,
             outer_stream));
 

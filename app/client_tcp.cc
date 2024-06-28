@@ -233,6 +233,8 @@ struct client_args {
     std::vector<uint8_t> send_buf;
     uint32_t send_buf_num;
     uint32_t chunk_size;
+    uint32_t check_ack_freq;
+    bool ignore_ack;
 };
 
 int init_rte_env(void* arg1)
@@ -390,7 +392,7 @@ void init(
     const std::string& log_level)
 {
 
-    std::vector<std::string> arguments = { ".", "--lcores", lcores, "--socket-mem", socket_mem, "--iova-mode", iova_mode, "--log-level", log_level, "--file-prefix", dev_pci_addrs[0] };
+    std::vector<std::string> arguments = { ".", "--lcores", lcores, "--socket-mem", socket_mem, "--iova-mode", iova_mode, "--log-level", log_level, "--file-prefix", dev_pci_addrs[0] + lcores };
 
     for (auto& dev_pci_addr : dev_pci_addrs) {
         arguments.push_back("-a");
@@ -542,9 +544,16 @@ int sending_tcp_data(void* arg1)
     uint16_t nb_txd = arg->nb_txd;
 
     uint32_t seqn = arg->seqn;
+    uint32_t wait_seqn = arg->seqn;
     uint32_t ackn = arg->ackn;
 
+    uint32_t check_ack_freq = arg->check_ack_freq;
+
     const size_t chunk_size = arg->chunk_size; // 16MiB
+
+    bool ignore_ack = arg->ignore_ack;
+
+    bool is_first = true;
 
     // NOTE: Assume frame index is always zero to make things easy
     std::vector<std::tuple<std::vector<struct rte_mbuf*>, size_t>> bss;
@@ -565,7 +574,17 @@ int sending_tcp_data(void* arg1)
 
     auto ts1 = std::chrono::high_resolution_clock::now();
 
+    size_t tx_time = 0;
+    size_t rtt_measured = 0;
+
+    double sum_rtt = 0;
+    double sum2_rtt = 0;
+    double max_rtt = -1;
+    double min_rtt = 1000000;
+
     while (g_running) {
+
+        auto tx_st = std::chrono::high_resolution_clock::now();
 
         for (const auto& bs_info : bss) {
             const auto& reference_bs = std::get<0>(bs_info);
@@ -584,20 +603,45 @@ int sending_tcp_data(void* arg1)
                 seqn += rte_pktmbuf_pkt_len(b) - b->l2_len - b->l3_len - b->l4_len;
             }
 
+            if (!is_first) {
+                if (!ignore_ack && ((tx_time + 1) % check_ack_freq == 0)) {
+                    auto ns = wait_packet(
+                        dev_port_id,
+                        [&]() {
+                            return g_running;
+                        },
+                        [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
+                            return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_c\
+pu_32(tcp->recv_ack) == wait_seqn);
+                        });
+                    auto tx_ed = std::chrono::high_resolution_clock::now();
+
+                    double elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(tx_ed - tx_st).count() / 1000.0;
+                    if (tx_time > 10) {
+                        rtt_measured++;
+                        sum_rtt += elapsed;
+                        sum2_rtt += elapsed * elapsed;
+                        max_rtt = std::max(max_rtt, elapsed);
+                        min_rtt = std::min(min_rtt, elapsed);
+                    }
+                }
+            } else {
+                is_first = false;
+            }
+            wait_seqn = seqn;
+
             // Transmit
-            auto nb = rte_eth_tx_burst(dev_port_id, 0, bs.data(), bs.size());
-            if (nb != bs.size()) {
-                throw std::runtime_error("Failed to send data");
+            if (tx_time % check_ack_freq == 0) {
+                tx_st = std::chrono::high_resolution_clock::now();
             }
 
-            auto ns = wait_packet(
-                dev_port_id,
-                [&]() {
-                    return g_running;
-                },
-                [&](const rte_ipv4_hdr*, const rte_tcp_hdr* tcp) {
-                    return (tcp->tcp_flags & RTE_TCP_ACK_FLAG) && (tcp->dst_port == rte_cpu_to_be_16(arg->client_port)) && (rte_be_to_cpu_32(tcp->recv_ack) == seqn);
-                });
+            size_t transmitted_num = 0;
+            while (transmitted_num < bs.size()) {
+                auto nb = rte_eth_tx_burst(dev_port_id, 0, bs.data() + transmitted_num, bs.size() - transmitted_num);
+                transmitted_num += nb;
+            }
+
+            tx_time++;
 
             if (!g_running) {
                 break;
@@ -642,6 +686,16 @@ int sending_tcp_data(void* arg1)
     if (!rte_eth_stats_get(dev_port_id, &stats)) {
         print_statistics(elapsed, stats.obytes);
     }
+
+    if (n > 0) {
+        printf("*****************************\n");
+        printf("average rtt : %f usec \n", sum_rtt / rtt_measured);
+        printf("std_dev rtt : %f usec \n", std::sqrt(sum2_rtt / rtt_measured - (sum_rtt / rtt_measured) * (sum_rtt / rtt_measured)));
+        printf("minimum rtt : %f usec \n", (double)min_rtt);
+        printf("maximum rtt : %f usec \n", (double)max_rtt);
+        printf("*****************************\n");
+    }
+
     return 0;
 }
 
@@ -858,9 +912,18 @@ int main(int argc, char** argv)
         .help("specify the chunk size for one rx")
         .scan<'u', uint32_t>();
 
+    program.add_argument("--check_ack_interval")
+        .default_value<uint32_t>(1)
+        .help("specify checking ack frequency")
+        .scan<'u', uint32_t>();
+
     program.add_argument("--output_sent_file")
         .default_value<std::string>("")
         .help("specify the filename");
+
+    program.add_argument("--ignore_ack")
+        .help("switch ignore ack")
+        .flag();
 
     try {
         program.parse_args(argc, argv);
@@ -886,6 +949,8 @@ int main(int argc, char** argv)
     uint32_t frame_num = program.get<uint32_t>("--frame_num");
     uint32_t chunk_size = program.get<uint32_t>("--chunk_size");
     std::string output_file = program.get<std::string>("--output_sent_file");
+    uint32_t check_ack_freq = program.get<uint32_t>("--check_ack_interval");
+    bool ignore_ack = (program["--ignore_ack"] == true);
 
     auto socket_mem = get_socket_mem(lcores);
 
@@ -916,6 +981,8 @@ int main(int argc, char** argv)
         client_argses.at(i).send_buf = send_buf;
         client_argses.at(i).send_buf_num = frame_num;
         client_argses.at(i).chunk_size = chunk_size;
+        client_argses.at(i).check_ack_freq = check_ack_freq;
+        client_argses.at(i).ignore_ack = ignore_ack;
     }
 
     std::sort(client_argses.begin(), client_argses.end(),

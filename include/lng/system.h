@@ -29,8 +29,10 @@ public:
         return *actor;
     }
 
-    template<typename T, typename... Args,
-        typename std::enable_if<!std::is_same<DPDKStream, T>::value>::type* = nullptr >
+    template <typename T, typename... Args,
+        typename std::enable_if<!std::is_same<DPDKStream, T>::value>::type* = nullptr,
+        typename std::enable_if<!std::is_same<DPDKGPUUDPStream, T>::value>::type* = nullptr,
+        typename std::enable_if<!std::is_same<DPDKGPUTCPStream, T>::value>::type* = nullptr>
     std::shared_ptr<T> create_stream(Args... args)
     {
         auto stream(std::make_shared<T>(args...));
@@ -38,8 +40,8 @@ public:
         return stream;
     }
 
-    template<typename T, typename... Args,
-        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr >
+    template <typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKStream, T>::value>::type* = nullptr>
     std::shared_ptr<T> create_stream(Args... args)
     {
         register_runtime(Runtime::DPDK);
@@ -49,12 +51,33 @@ public:
         return stream;
     }
 
+    template <typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKGPUUDPStream, T>::value>::type* = nullptr>
+    std::shared_ptr<T> create_stream(Args... args)
+    {
+        register_runtime(Runtime::DPDKGPU);
+
+        auto stream(std::make_shared<T>(std::dynamic_pointer_cast<DPDKGPURuntime>(select_runtime(Runtime::DPDKGPU)), args...));
+        register_stream(stream);
+        return stream;
+    }
+
+    template <typename T, typename... Args,
+        typename std::enable_if<std::is_same<DPDKGPUTCPStream, T>::value>::type* = nullptr>
+    std::shared_ptr<T> create_stream(Args... args)
+    {
+        register_runtime(Runtime::DPDKGPU);
+
+        auto stream(std::make_shared<T>(std::dynamic_pointer_cast<DPDKGPURuntime>(select_runtime(Runtime::DPDKGPU)), args...));
+        register_stream(stream);
+        return stream;
+    }
+
     void start();
 
     void stop();
 
     void terminate();
-
 
 private:
     void register_actor(const std::string& id, const std::shared_ptr<Actor>& actor);

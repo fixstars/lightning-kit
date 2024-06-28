@@ -18,6 +18,7 @@ struct doca_flow_pipe_entry;
 namespace lng {
 
 class DPDKRuntime;
+class DPDKGPURuntime;
 struct rx_queue;
 struct tx_queue;
 struct semaphore;
@@ -53,8 +54,8 @@ public:
     {
     }
 
-    virtual void start() {}
-    virtual void stop() {}
+    virtual void start() { }
+    virtual void stop() { }
 
     virtual bool put(T* v, size_t count)
     {
@@ -79,21 +80,40 @@ private:
 
 class DPDKStream : public Stream, public Queueable<rte_mbuf*> {
 
+public:
+    enum PKTType {
+        FIN,
+        TCP,
+        OTHER
+    };
+
+private:
     struct Impl {
         std::shared_ptr<DPDKRuntime> rt;
         uint16_t port_id;
         uint16_t tcp_port;
         bool send_ack(rte_mbuf* recv_mbuf, uint32_t length);
+        bool send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length);
         bool send_synack(rte_mbuf* tar);
-        void wait_for_3wayhandshake();
-        bool check_target_packet(rte_mbuf* recv_mbuf);
+        rte_mbuf* wait_for_3wayhandshake();
+        void prepare_ack_tmp_pkt(rte_mbuf* ref);
+        PKTType check_target_packet(rte_mbuf* recv_mbuf);
 
         Impl(const std::shared_ptr<DPDKRuntime>& rt, uint16_t port_id)
-            : rt(rt), port_id(port_id)
-        {}
+            : rt(rt)
+            , port_id(port_id)
+            , ack_tmp_count(0)
+        {
+        }
 
     private:
         bool send_flag_packet(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
+        bool send_flag_packet_from_tmp(rte_mbuf* tar, uint32_t length, uint8_t tcp_flags);
+
+        static constexpr int ACK_TMP_NUM = 128;
+        int ack_tmp_count;
+        rte_mbuf* ack_tmp_pkt[ACK_TMP_NUM];
+        uint32_t prev_ack = 0;
     };
 
 public:
@@ -116,14 +136,94 @@ public:
         return impl_->send_ack(recv_mbuf, length);
     }
 
-    bool check_target_packet(rte_mbuf* recv_mbuf)
+    bool send_ack_from_tmp(rte_mbuf* recv_mbuf, uint32_t length)
+    {
+        return impl_->send_ack_from_tmp(recv_mbuf, length);
+    }
+
+    PKTType check_target_packet(rte_mbuf* recv_mbuf)
     {
         return impl_->check_target_packet(recv_mbuf);
     }
 
-    void wait_for_3wayhandshake() {
-        impl_->wait_for_3wayhandshake();
+    rte_mbuf* wait_for_3wayhandshake()
+    {
+        return impl_->wait_for_3wayhandshake();
     }
+
+    void prepare_ack_tmp_pkt(rte_mbuf* ref)
+    {
+        return impl_->prepare_ack_tmp_pkt(ref);
+    }
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+class DPDKGPUUDPStream : public Stream, public Queueable<rte_mbuf*> {
+
+    struct Impl {
+        std::shared_ptr<DPDKGPURuntime> rt;
+        uint16_t port_id;
+        uint16_t tcp_port;
+
+        Impl(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
+    };
+
+public:
+    DPDKGPUUDPStream(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
+    {
+    }
+
+    virtual void start();
+    virtual void stop();
+
+    virtual bool put(rte_mbuf** v, size_t count);
+
+    virtual size_t get(rte_mbuf** vp, size_t max);
+
+    virtual size_t count();
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+class DPDKGPUTCPStream : public Stream, public Queueable<rte_mbuf*> {
+
+    struct Impl {
+        std::shared_ptr<DPDKGPURuntime> rt;
+        uint16_t port_id;
+        uint16_t tcp_port;
+
+        Impl(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+            : rt(rt)
+            , port_id(port_id)
+        {
+        }
+    };
+
+public:
+    DPDKGPUTCPStream(const std::shared_ptr<DPDKGPURuntime>& rt, uint16_t port_id)
+        : impl_(new Impl(rt, port_id))
+    {
+    }
+
+    virtual void start();
+    virtual void stop();
+
+    virtual bool put(rte_mbuf** v, size_t count);
+
+    virtual size_t get(rte_mbuf** vp, size_t max);
+
+    virtual size_t count();
+
+    rte_mbuf* alloc_ack_mbuf();
+    rte_mbuf* clone_ack_mbuf(rte_mbuf* tmp);
 
 private:
     std::shared_ptr<Impl> impl_;
@@ -133,7 +233,7 @@ private:
 
 #if defined(LNG_WITH_DOCA)
 
-class DOCAUDPStream : public Stream, public Queueable<uint8_t*> {
+class DOCAUDPEchoStream : public Stream, public Queueable<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -159,13 +259,17 @@ class DOCAUDPStream : public Stream, public Queueable<uint8_t*> {
     };
 
 public:
-    DOCAUDPStream(std::string nic_addr, std::string gpu_addr)
+    DOCAUDPEchoStream(std::string nic_addr, std::string gpu_addr)
         : impl_(new Impl(nic_addr, gpu_addr))
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -176,14 +280,14 @@ public:
     {
         return impl_->get(vp, max);
     }
-    
+
     virtual size_t count();
 
 private:
     std::shared_ptr<Impl> impl_;
 };
 
-class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
+class DOCAUDPFrameBuilderStream : public Stream, public Queueable<uint8_t*> {
 
     struct Impl {
         struct doca_gpu* gpu_dev;
@@ -198,16 +302,12 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
         struct doca_flow_pipe* rxq_pipe;
         struct doca_flow_pipe* root_pipe;
         struct doca_flow_pipe_entry* root_udp_entry;
-        std::unique_ptr<struct tx_buf> tx_buf_arr;
 
-        static constexpr uint32_t FRAME_NUM = 2;
-        static constexpr size_t FRAME_SIZE = 1024 * 1024 * 1024;
-        static constexpr size_t TMP_FRAME_SIZE = 1024 * 1024 * 1024;
-
-        uint32_t* first_ackn;
-        int* is_fin;
-        uint8_t* tar_bufs;
+        uint8_t* tar_buf;
         uint8_t* tmp_buf;
+        static constexpr size_t frame_size = (size_t)512 * 1024 * 1024;
+        static constexpr size_t frame_num = 2;
+        static constexpr size_t tmp_size = (size_t)512 * 1024 * 1024;
 
         Impl(std::string nic_addr, std::string gpu_addr);
         ~Impl();
@@ -216,13 +316,17 @@ class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
     };
 
 public:
-    DOCATCPStream(std::string nic_addr, std::string gpu_addr)
+    DOCAUDPFrameBuilderStream(std::string nic_addr, std::string gpu_addr)
         : impl_(new Impl(nic_addr, gpu_addr))
     {
     }
 
-    virtual void start() { /*TBD*/ }
-    virtual void stop() { /*TBD*/ }
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
 
     virtual bool put(uint8_t** v, size_t count)
     {
@@ -233,6 +337,29 @@ public:
     {
         return impl_->get(vp, max);
     }
+
+    virtual size_t count();
+
+private:
+    std::shared_ptr<Impl> impl_;
+};
+
+class DOCATCPStream : public Stream, public Queueable<uint8_t*> {
+    struct Impl;
+
+public:
+    DOCATCPStream(std::string nic_addr, std::string gpu_addr);
+
+    virtual void start()
+    { /*TBD*/
+    }
+    virtual void stop()
+    { /*TBD*/
+    }
+
+    virtual bool put(uint8_t** v, size_t count);
+
+    virtual size_t get(uint8_t** vp, size_t max);
 
     virtual size_t count();
 
@@ -273,7 +400,7 @@ struct Payload {
 };
 #endif
 struct Frame {
-    static constexpr size_t frame_size = 256;//64 * 1024 * 1024;
+    static constexpr size_t frame_size = 512 * 1024 * 1024;
     size_t frame_id;
     uint8_t body[frame_size];
 };

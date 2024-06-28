@@ -6,6 +6,8 @@
 #include "doca-common-util-internal.h"
 #include "lng/doca-util.h"
 
+#include "log.h"
+
 DOCA_LOG_REGISTER(DOCA_COMMON_UTIL);
 
 namespace lng {
@@ -23,7 +25,7 @@ open_doca_device_with_pci(const char* pcie_value, struct doca_dev** retval)
 
     res = doca_devinfo_create_list(&dev_list, &nb_devs);
     if (res != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to load doca devices list. Doca_error value: %d", res);
+        log::error("Failed to load doca devices list. Doca_error value: %d", res);
         return res;
     }
 
@@ -40,7 +42,7 @@ open_doca_device_with_pci(const char* pcie_value, struct doca_dev** retval)
         }
     }
 
-    DOCA_LOG_ERR("Matching device not found");
+    log::error("Matching device not found");
     res = DOCA_ERROR_NOT_FOUND;
 
     doca_devinfo_destroy_list(dev_list);
@@ -53,7 +55,7 @@ init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dp
     doca_error_t result;
     int ret;
 
-    std::vector<std::string> eal_param = { "", "-a", "00:00.0" };
+    std::vector<std::string> eal_param = { "", "-a", "00:00.0", "--file-prefix", "a1" };
     std::vector<char*> eal_param_;
     for (auto& p : eal_param) {
         eal_param_.push_back(&p[0]);
@@ -68,26 +70,26 @@ init_doca_device(const char* nic_pcie_addr, struct doca_dev** ddev, uint16_t* dp
 
     result = open_doca_device_with_pci(nic_pcie_addr, ddev);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to open NIC device based on PCI address");
+        log::error("Failed to open NIC device based on PCI address");
         return result;
     }
 
     ret = rte_eal_init(eal_param_.size() - 1, eal_param_.data());
     if (ret < 0) {
-        DOCA_LOG_ERR("DPDK init failed: %d", ret);
+        log::error("DPDK init failed: %d", ret);
         return DOCA_ERROR_DRIVER;
     }
 
     /* Enable DOCA Flow HWS mode */
     result = doca_dpdk_port_probe(*ddev, "dv_flow_en=2");
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Function doca_dpdk_port_probe returned %s", doca_error_get_descr(result));
+        log::error("Function doca_dpdk_port_probe returned %s", doca_error_get_descr(result));
         return result;
     }
 
     result = doca_dpdk_get_first_port_id(*ddev, dpdk_port_id);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Function doca_dpdk_get_first_port_id returned %s", doca_error_get_descr(result));
+        log::error("Function doca_dpdk_get_first_port_id returned %s", doca_error_get_descr(result));
         return result;
     }
 
@@ -99,7 +101,7 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
     doca_error_t result;
     result = doca_gpu_semaphore_create(gpu_dev, &(sem->sem_cpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_create: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_create: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
@@ -113,14 +115,14 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
      */
     result = doca_gpu_semaphore_set_memory_type(sem->sem_cpu, mem_type);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_memory_type: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_set_memory_type: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_gpu_semaphore_set_items_num(sem->sem_cpu, sem_num);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_items_num: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_set_items_num: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
@@ -132,21 +134,21 @@ doca_error_t create_semaphore(semaphore* sem, struct doca_gpu* gpu_dev, uint32_t
      */
     result = doca_gpu_semaphore_set_custom_info(sem->sem_cpu, element_size, DOCA_GPU_MEM_TYPE_CPU_GPU);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_set_custom_info: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_set_custom_info: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_gpu_semaphore_start(sem->sem_cpu);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_start: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_gpu_semaphore_get_gpu_handle(sem->sem_cpu, &(sem->sem_gpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_gpu_semaphore_get_gpu_handle: %s", doca_error_get_descr(result));
+        log::error("Failed doca_gpu_semaphore_get_gpu_handle: %s", doca_error_get_descr(result));
         destroy_semaphore(sem);
         return DOCA_ERROR_BAD_STATE;
     }
@@ -162,40 +164,40 @@ doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, str
     doca_error_t result;
     result = doca_eth_rxq_create(ddev, MAX_PKT_NUM, MAX_PKT_SIZE, &(rxq->eth_rxq_cpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_create: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_rxq_create: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_rxq_set_type(rxq->eth_rxq_cpu, DOCA_ETH_RXQ_TYPE_CYCLIC);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_set_type: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_rxq_set_type: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_rxq_estimate_packet_buf_size(DOCA_ETH_RXQ_TYPE_CYCLIC, 0, 0, MAX_PKT_SIZE, MAX_PKT_NUM, 0, &cyclic_buffer_size);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to get eth_rxq cyclic buffer size: %s", doca_error_get_descr(result));
+        log::error("Failed to get eth_rxq cyclic buffer size: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_mmap_create(&rxq->pkt_buff_mmap);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to create mmap: %s", doca_error_get_descr(result));
+        log::error("Failed to create mmap: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_mmap_add_dev(rxq->pkt_buff_mmap, ddev);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to add dev to mmap: %s", doca_error_get_descr(result));
+        log::error("Failed to add dev to mmap: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_gpu_mem_alloc(gpu_dev, cyclic_buffer_size, GPU_PAGE_SIZE, DOCA_GPU_MEM_TYPE_GPU, &rxq->gpu_pkt_addr, NULL);
     if (result != DOCA_SUCCESS || rxq->gpu_pkt_addr == NULL) {
-        DOCA_LOG_ERR("Failed to allocate gpu memory %s", doca_error_get_descr(result));
+        log::error("Failed to allocate gpu memory %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
@@ -209,7 +211,7 @@ doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, str
         /* If failed, use nvidia-peermem method */
         result = doca_mmap_set_memrange(rxq->pkt_buff_mmap, rxq->gpu_pkt_addr, cyclic_buffer_size);
         if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Failed to set memrange for mmap %s", doca_error_get_descr(result));
+            log::error("Failed to set memrange for mmap %s", doca_error_get_descr(result));
             destroy_rx_queue(rxq);
             return DOCA_ERROR_BAD_STATE;
         }
@@ -219,7 +221,7 @@ doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, str
 
         result = doca_mmap_set_dmabuf_memrange(rxq->pkt_buff_mmap, rxq->dmabuf_fd, rxq->gpu_pkt_addr, 0, cyclic_buffer_size);
         if (result != DOCA_SUCCESS) {
-            DOCA_LOG_ERR("Failed to set dmabuf memrange for mmap %s", doca_error_get_descr(result));
+            log::error("Failed to set dmabuf memrange for mmap %s", doca_error_get_descr(result));
             destroy_rx_queue(rxq);
             return DOCA_ERROR_BAD_STATE;
         }
@@ -227,49 +229,49 @@ doca_error_t create_rx_queue(struct rx_queue* rxq, struct doca_gpu* gpu_dev, str
 
     result = doca_mmap_set_permissions(rxq->pkt_buff_mmap, DOCA_ACCESS_FLAG_LOCAL_READ_WRITE | DOCA_ACCESS_FLAG_PCI_RELAXED_ORDERING);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set permissions for mmap %s", doca_error_get_descr(result));
+        log::error("Failed to set permissions for mmap %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_mmap_start(rxq->pkt_buff_mmap);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to start mmap %s", doca_error_get_descr(result));
+        log::error("Failed to start mmap %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_rxq_set_pkt_buf(rxq->eth_rxq_cpu, rxq->pkt_buff_mmap, 0, cyclic_buffer_size);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set cyclic buffer  %s", doca_error_get_descr(result));
+        log::error("Failed to set cyclic buffer  %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     rxq->eth_rxq_ctx = doca_eth_rxq_as_doca_ctx(rxq->eth_rxq_cpu);
     if (rxq->eth_rxq_ctx == NULL) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_as_doca_ctx: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_rxq_as_doca_ctx: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_ctx_set_datapath_on_gpu(rxq->eth_rxq_ctx, gpu_dev);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_set_datapath_on_gpu: %s", doca_error_get_descr(result));
+        log::error("Failed doca_ctx_set_datapath_on_gpu: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_ctx_start(rxq->eth_rxq_ctx);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_start: %s", doca_error_get_descr(result));
+        log::error("Failed doca_ctx_start: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_rxq_get_gpu_handle(rxq->eth_rxq_cpu, &(rxq->eth_rxq_gpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_rxq_get_gpu_handle: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_rxq_get_gpu_handle: %s", doca_error_get_descr(result));
         destroy_rx_queue(rxq);
         return DOCA_ERROR_BAD_STATE;
     }
@@ -281,43 +283,43 @@ doca_error_t create_tx_queue(struct tx_queue* txq, struct doca_gpu* gpu_dev, str
     doca_error_t result;
     result = doca_eth_txq_create(ddev, MAX_SQ_DESCR_NUM, &(txq->eth_txq_cpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_txq_create: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_txq_create: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_txq_set_l3_chksum_offload(txq->eth_txq_cpu, 1);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set eth_txq l3 offloads: %s", doca_error_get_descr(result));
+        log::error("Failed to set eth_txq l3 offloads: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_txq_set_l4_chksum_offload(txq->eth_txq_cpu, 1);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed to set eth_txq l4 offloads: %s", doca_error_get_descr(result));
+        log::error("Failed to set eth_txq l4 offloads: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     txq->eth_txq_ctx = doca_eth_txq_as_doca_ctx(txq->eth_txq_cpu);
     if (txq->eth_txq_ctx == NULL) {
-        DOCA_LOG_ERR("Failed doca_eth_txq_as_doca_ctx: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_txq_as_doca_ctx: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_ctx_set_datapath_on_gpu(txq->eth_txq_ctx, gpu_dev);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_set_datapath_on_gpu: %s", doca_error_get_descr(result));
+        log::error("Failed doca_ctx_set_datapath_on_gpu: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_ctx_start(txq->eth_txq_ctx);
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_ctx_start: %s", doca_error_get_descr(result));
+        log::error("Failed doca_ctx_start: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
 
     result = doca_eth_txq_get_gpu_handle(txq->eth_txq_cpu, &(txq->eth_txq_gpu));
     if (result != DOCA_SUCCESS) {
-        DOCA_LOG_ERR("Failed doca_eth_txq_get_gpu_handle: %s", doca_error_get_descr(result));
+        log::error("Failed doca_eth_txq_get_gpu_handle: %s", doca_error_get_descr(result));
         return DOCA_ERROR_BAD_STATE;
     }
     return result;

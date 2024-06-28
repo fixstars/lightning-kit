@@ -17,8 +17,11 @@ public:
         , valid_payload_stream_(valid)
         , ready_payload_stream_(ready)
         , payload_(nullptr)
+        , TIMING()
     {
     }
+
+    ~Receiver();
 
 protected:
     virtual void setup() override;
@@ -29,7 +32,12 @@ private:
     std::shared_ptr<Queueable<Payload*>> valid_payload_stream_;
     std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
 
-    Payload *payload_;
+    Payload* payload_;
+
+    static constexpr int NUM_RDTSC = 16 * 25;
+    uint64_t prev_rdtsc_ = 0;
+
+    std::array<uint64_t, NUM_RDTSC> TIMING;
 };
 
 class FrameBuilder : public Actor {
@@ -62,7 +70,7 @@ private:
     std::shared_ptr<Queueable<Payload*>> ready_payload_stream_;
     std::shared_ptr<Queueable<Frame*>> valid_frame_stream_;
     std::shared_ptr<Queueable<Frame*>> ready_frame_stream_;
-    #if 0
+#if 0
     Frame* next_frame_;
     size_t frame_id_;
     size_t write_head_;
@@ -73,6 +81,6 @@ private:
     Frame* frame_;
     size_t frame_id_;
     size_t frame_write_offset_;
-    #endif
+#endif
 };
 }
