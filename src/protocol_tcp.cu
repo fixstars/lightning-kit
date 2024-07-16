@@ -1309,7 +1309,7 @@ __global__ void cuda_kernel_makeframe_assumering(
                 return;
             }
             if (status_frame == DOCA_GPU_SEMAPHORE_STATUS_FREE) {
-                printf("%d %lld set buf\n", sem_frame_idx, frame_head);
+                // printf("%d %lld set buf\n", sem_frame_idx, frame_head);
                 cur_tar_buf = tar_buf + sem_frame_idx * frame_size;
                 is_head_copy = true;
             }
@@ -1415,9 +1415,9 @@ __global__ void cuda_kernel_makeframe_assumering(
                         }
                     }
                 } else {
-                    if (threadIdx.x == 0) {
-                        printf("%llu tail\n", cur_head + total_payload_size);
-                    }
+                    // if (threadIdx.x == 0) {
+                    //     printf("%llu tail\n", cur_head + total_payload_size);
+                    // }
                     if (cur_head + total_payload_size <= frame_size) {
                         uint32_t write_byte = total_payload_size;
                         uint8_t* data_head = cur_tar_buf + cur_head;
@@ -1524,9 +1524,9 @@ __global__ void cuda_kernel_makeframe_assumering(
                 ret = doca_gpu_dev_semaphore_set_status(sem_frame, sem_frame_idx, DOCA_GPU_SEMAPHORE_STATUS_READY);
                 __threadfence_system();
                 auto cl_end = clock();
-                printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
-                printf("%u %d pkt_num\n", pkt_num, id);
-                printf("%llu clock\n", cl_end - cl_start);
+                // printf("%llu %u frame_head send\n", frame_head, packet_reached_thidx_share[0]);
+                // printf("%u %d pkt_num\n", pkt_num, id);
+                // printf("%llu clock\n", cl_end - cl_start);
                 sem_frame_idx = (sem_frame_idx + 1) % frame_num;
                 cur_tar_buf = nullptr;
                 frame_head -= frame_size;
@@ -1650,8 +1650,8 @@ void init_tcp_kernels(std::vector<cudaStream_t>& streams)
 
     frame_notice<<<1, CUDA_THREADS>>>(0, nullptr, nullptr, true);
 
-    frame_check_kernel<<<1, 32>>>(nullptr, 0, nullptr, true);
-    frame_check_print<<<1, 32>>>(nullptr, true);
+    // frame_check_kernel<<<1, 32>>>(nullptr, 0, nullptr, true);
+    // frame_check_print<<<1, 32>>>(nullptr, true);
 
     streams.resize(4);
 
@@ -1719,15 +1719,15 @@ void launch_tcp_kernels(struct rx_queue* rxq,
     //     sem_fr->sem_num, sem_fr->sem_gpu,
     //     is_fin, false, id);
 
-    // frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
+    frame_notice<<<1, 32, 0, streams[2]>>>(sem_fr->sem_num, sem_fr->sem_gpu, is_fin, false);
 }
 
 void frame_check(uint8_t* frame, size_t frame_size, int* res, cudaStream_t stream)
 {
-    cudaMemsetAsync(res, 1, sizeof(int), stream);
-    frame_check_kernel<<<16, 1024, 0, stream>>>(frame, frame_size, res, false);
-    cudaMemsetAsync(frame, 0, frame_size, stream); // reset
-    frame_check_print<<<1, 1, 0, stream>>>(res, false);
+    // cudaMemsetAsync(res, 1, sizeof(int), stream);
+    // frame_check_kernel<<<16, 1024, 0, stream>>>(frame, frame_size, res, false);
+    // cudaMemsetAsync(frame, 0, frame_size, stream); // reset
+    // frame_check_print<<<1, 1, 0, stream>>>(res, false);
 }
 
 }

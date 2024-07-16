@@ -454,7 +454,7 @@ size_t DOCATCPStream::Impl::get(uint8_t** vp, size_t max)
         } else {
             doca_gpu_semaphore_get_custom_info_addr(sem_fr.at(0).sem_cpu, sem_idx, (void**)&(fr_info_global));
             DOCA_GPUNETIO_VOLATILE(vp[ret]) = DOCA_GPUNETIO_VOLATILE(fr_info_global->eth_payload);
-            printf("get %p\n", vp[ret]);
+            // printf("get %p\n", vp[ret]);
             frame_check(vp[ret], FRAME_SIZE, check_frame_ok, check_stream);
             cudaStreamSynchronize(check_stream);
             // static int count = 0;
@@ -470,8 +470,8 @@ size_t DOCATCPStream::Impl::get(uint8_t** vp, size_t max)
     }
 
     sem_fr_idx = (sem_fr_idx + ret) % sem_fr.at(0).sem_num;
-    if (ret)
-        printf("sem_fr_idx %d\n", sem_fr_idx);
+    // if (ret)
+    //     printf("sem_fr_idx %d\n", sem_fr_idx);
 
     return ret;
 }
